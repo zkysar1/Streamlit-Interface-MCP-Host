@@ -1,6 +1,8 @@
 import psutil
 import os
-from openai import OpenAI
+import requests
+from sseclient import SSEClient
+import json
 import streamlit as st
 
 
@@ -12,15 +14,50 @@ Zak Kysar *DRAFT*
 
 
 
-@st.cache_resource
-def get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        st.error("OPENAI_API_KEY environment variable not set!")
-        st.stop()
-    return OpenAI(api_key=api_key)
-
-client = get_openai_client()
+def send_to_backend_streaming(messages):
+    """Send messages to Agents-MCP-Host backend with SSE streaming"""
+    url = "http://localhost:8080/host/v1/conversations"
+    payload = {"messages": messages}
+    headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
+    
+    try:
+        # Make streaming request
+        response = requests.post(url, json=payload, headers=headers, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        # Create SSE client
+        client = SSEClient(response)
+        
+        # Process events
+        for event in client.events():
+            if event.event == 'tool_call_start':
+                data = json.loads(event.data)
+                yield f"🔧 {data.get('message', 'Starting tool call...')}\n\n"
+            elif event.event == 'tool_call_complete':
+                data = json.loads(event.data)
+                yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
+            elif event.event == 'final_response':
+                data = json.loads(event.data)
+                content = data.get('content', '')
+                yield content
+                break
+            elif event.event == 'error':
+                data = json.loads(event.data)
+                yield f"❌ Error: {data.get('message', 'Unknown error')}"
+                break
+                
+    except requests.exceptions.ConnectionError:
+        yield "❌ Backend server not running. Please start Agents-MCP-Host on port 8080."
+    except requests.exceptions.HTTPError as e:
+        try:
+            error_detail = e.response.json().get('error', {}).get('message', str(e))
+        except:
+            error_detail = str(e)
+        yield f"❌ Backend error: {error_detail}"
+    except requests.exceptions.Timeout:
+        yield "❌ Request timed out. The backend took too long to respond."
+    except Exception as e:
+        yield f"❌ Unexpected error: {str(e)}"
 
 
 # create opening message exchanges
@@ -59,9 +96,9 @@ for message in st.session_state.messages:
 
 
 
-# process user command
+# process user command with streaming
 def process_command(command):
-    # Build messages for OpenAI API
+    # Build messages for backend API
     messages = []
     
     # Add system message if it exists
@@ -80,16 +117,8 @@ def process_command(command):
     # Add current user command
     messages.append({"role": "user", "content": command})
     
-    # Send command to the model
-    with st.spinner('llm working on a response...'):
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini-2024-07-18",
-            messages=messages,
-            max_tokens=400,
-            temperature=0.2
-        )
-        response = completion.choices[0].message.content
-        return response
+    # Stream from backend
+    return send_to_backend_streaming(messages)
 
 
 
@@ -100,12 +129,18 @@ if prompt := st.chat_input("Paste Context or answers or questions. . ."):
         st.text("User: "+prompt)
     # Add user message to chat history
     st.session_state.messages.append({"role": "User", "content": prompt})
-    # Send this to the llm
-    llmResponse= process_command(prompt)
-    # Display assistant response in chat message container
+    
+    # Display assistant response with streaming
     with st.chat_message("Assistant"):
-        st.text("Assistant: "+llmResponse)
-    # Add assistant response to chat history
-    st.session_state.messages.append({"role": "Assistant", "content": llmResponse})
+        response_placeholder = st.empty()
+        full_response = ""
+        
+        # Stream the response
+        for chunk in process_command(prompt):
+            full_response += chunk
+            response_placeholder.markdown("Assistant: " + full_response)
+        
+        # Add complete response to chat history
+        st.session_state.messages.append({"role": "Assistant", "content": full_response})
         
     
