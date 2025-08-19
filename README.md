@@ -10,6 +10,18 @@ A modern Streamlit chat interface that connects to the Agents-MCP-Host backend, 
 - **🚀 No API Keys Required**: Backend handles all AI/LLM interactions
 - **📊 System Monitoring**: Built-in CPU, memory, and disk usage display
 
+
+## Directory Location
+```bash
+# Windows (WSL)
+win_home=$(wslpath -u "$(wslvar USERPROFILE)")
+cd $win_home/OneDrive/Zak/SmartNPCs/MCPThink/Streamlit-Interface-MCP-Host/
+
+# Linux/Mac
+cd ~/Streamlit-Interface-MCP-Host/
+```
+
+
 ## 📋 Prerequisites
 
 - **Python 3.8+** - Check: `python3 --version`
