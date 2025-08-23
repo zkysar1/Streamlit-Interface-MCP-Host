@@ -36,6 +36,12 @@ def send_to_backend_streaming(messages):
             elif event.event == 'tool_call_complete':
                 data = json.loads(event.data)
                 yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
+            elif event.event == 'progress':
+                data = json.loads(event.data)
+                step = data.get('step', '')
+                message = data.get('message', '')
+                elapsed = data.get('elapsed', 0)
+                yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
             elif event.event == 'final_response':
                 data = json.loads(event.data)
                 content = data.get('content', '')
