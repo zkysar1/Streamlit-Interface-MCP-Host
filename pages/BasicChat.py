@@ -67,64 +67,64 @@ def send_to_backend_streaming(messages):
                                     content = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
                                     yield f"  - **{role}**: {content}\n"
                                 yield f"  - Total messages: {details.get('messageCount', 0)}\n\n"
-                    
+                                
                             elif phase == 'llm_response':
-                    response_text = details.get('response', '')[:500] + '...' if len(details.get('response', '')) > 500 else details.get('response', '')
-                    metadata = details.get('metadata', {})
-                    yield "\n📥 **LLM Response:**\n"
-                    yield f"  - Response: {response_text}\n"
-                    yield f"  - Model: {metadata.get('model', 'unknown')}\n"
-                    yield f"  - Tokens: {metadata.get('totalTokens', 0)} (prompt: {metadata.get('promptTokens', 0)}, completion: {metadata.get('completionTokens', 0)})\n\n"
-                    
+                                response_text = details.get('response', '')[:500] + '...' if len(details.get('response', '')) > 500 else details.get('response', '')
+                                metadata = details.get('metadata', {})
+                                yield "\n📥 **LLM Response:**\n"
+                                yield f"  - Response: {response_text}\n"
+                                yield f"  - Model: {metadata.get('model', 'unknown')}\n"
+                                yield f"  - Tokens: {metadata.get('totalTokens', 0)} (prompt: {metadata.get('promptTokens', 0)}, completion: {metadata.get('completionTokens', 0)})\n\n"
+                                
                             elif phase == 'sql_query':
-                    query = details.get('query', '')
-                    tables = details.get('tables', [])
-                    yield "\n🔍 **SQL Query:**\n"
-                    yield f"```sql\n{query}\n```\n"
-                    if tables:
-                        yield f"  - Tables: {', '.join(tables)}\n"
-                    yield f"  - Type: {details.get('queryType', 'unknown')}\n\n"
-                    
+                                query = details.get('query', '')
+                                tables = details.get('tables', [])
+                                yield "\n🔍 **SQL Query:**\n"
+                                yield f"```sql\n{query}\n```\n"
+                                if tables:
+                                    yield f"  - Tables: {', '.join(tables)}\n"
+                                yield f"  - Type: {details.get('queryType', 'unknown')}\n\n"
+                                
                             elif phase == 'sql_result':
-                    row_count = details.get('rowCount', 0)
-                    exec_time = details.get('executionTime', 0)
-                    preview = details.get('preview', [])
-                    yield "\n📊 **SQL Results:**\n"
-                    yield f"  - Rows returned: {row_count}\n"
-                    yield f"  - Execution time: {exec_time}ms\n"
-                    if preview:
-                        yield "  - Preview:\n"
-                        for i, row in enumerate(preview[:3]):
-                            yield f"    Row {i+1}: {json.dumps(row, indent=2)}\n"
-                    yield "\n"
-                    
+                                row_count = details.get('rowCount', 0)
+                                exec_time = details.get('executionTime', 0)
+                                preview = details.get('preview', [])
+                                yield "\n📊 **SQL Results:**\n"
+                                yield f"  - Rows returned: {row_count}\n"
+                                yield f"  - Execution time: {exec_time}ms\n"
+                                if preview:
+                                    yield "  - Preview:\n"
+                                    for i, row in enumerate(preview[:3]):
+                                        yield f"    Row {i+1}: {json.dumps(row, indent=2)}\n"
+                                yield "\n"
+                                
                             elif phase == 'metadata_exploration':
-                    table = details.get('table', '')
-                    col_count = details.get('columnCount', 0)
-                    yield "\n🗂️ **Metadata Exploration:**\n"
-                    yield f"  - Table: {table}\n"
-                    yield f"  - Columns: {col_count}\n\n"
-                    
+                                table = details.get('table', '')
+                                col_count = details.get('columnCount', 0)
+                                yield "\n🗂️ **Metadata Exploration:**\n"
+                                yield f"  - Table: {table}\n"
+                                yield f"  - Columns: {col_count}\n\n"
+                                
                             elif phase == 'schema_matching':
-                    matched = details.get('matchedTables', [])
-                    yield "\n🔗 **Schema Matching:**\n"
-                    yield f"  - User query: {details.get('userQuery', '')}\n"
-                    yield f"  - Matched tables: {matched}\n\n"
-                    
+                                matched = details.get('matchedTables', [])
+                                yield "\n🔗 **Schema Matching:**\n"
+                                yield f"  - User query: {details.get('userQuery', '')}\n"
+                                yield f"  - Matched tables: {matched}\n\n"
+                                
                             elif phase == 'enum_mapping':
-                    column = details.get('column', '')
-                    mapping_count = details.get('mappingCount', 0)
-                    yield "\n🏷️ **Enumeration Mapping:**\n"
-                    yield f"  - Column: {column}\n"
-                    yield f"  - Mappings found: {mapping_count}\n\n"
-                    
+                                column = details.get('column', '')
+                                mapping_count = details.get('mappingCount', 0)
+                                yield "\n🏷️ **Enumeration Mapping:**\n"
+                                yield f"  - Column: {column}\n"
+                                yield f"  - Mappings found: {mapping_count}\n\n"
+                                
                             elif phase == 'tool_selection':
-                    strategy = details.get('strategy', '')
-                    tools = details.get('selectedTools', [])
-                    yield "\n🛠️ **Tool Selection:**\n"
-                    yield f"  - Strategy: {strategy}\n"
-                    yield f"  - Selected tools: {tools}\n\n"
-                    
+                                strategy = details.get('strategy', '')
+                                tools = details.get('selectedTools', [])
+                                yield "\n🛠️ **Tool Selection:**\n"
+                                yield f"  - Strategy: {strategy}\n"
+                                yield f"  - Selected tools: {tools}\n\n"
+                                
                             else:
                                 # Default progress display
                                 step = data.get('step', '')
@@ -215,7 +215,7 @@ def send_to_backend_streaming(messages):
     except requests.exceptions.Timeout:
         yield "❌ Request timed out. The backend took too long to respond."
     except json.JSONDecodeError as e:
-        yield f"❌ Error parsing JSON: {e}\nRaw data: {event.data[:200] if event.data else 'None'}"
+        yield f"❌ Error parsing JSON: {e}\nRaw data: {data_str[:200] if 'data_str' in locals() else 'None'}"
     except Exception as e:
         import traceback
         yield f"❌ Unexpected error: {str(e)}\n{traceback.format_exc()}"
@@ -261,8 +261,6 @@ for message in st.session_state.messages:
                 st.markdown(message["content"])
             else:
                 st.text(message["role"]+": "+message["content"])
-
-
 
 
 
