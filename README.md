@@ -53,8 +53,12 @@ java -jar build/libs/Agents-MCP-Host-1.0.0-fat.jar
 python3 -m streamlit run Home.py
 
 # Windows PowerShell
+- Laptop
 python -m streamlit run "C:\Users\zkysa\OneDrive\Zak\SmartNPCs\MCPThink\Streamlit-Interface-MCP-Host\Home.py"
+- amd desktop
+py -m streamlit run "C:\Users\Zachary\OneDrive\Zak\SmartNPCs\MCPThink\Streamlit-Interface-MCP-Host\Home.py"
 ```
+
 
 The interface will open at `http://localhost:8501`
 

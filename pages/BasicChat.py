@@ -1,7 +1,6 @@
 import psutil
 import os
 import requests
-from sseclient import SSEClient
 import json
 import streamlit as st
 
@@ -25,24 +24,42 @@ def send_to_backend_streaming(messages):
         response = requests.post(url, json=payload, headers=headers, stream=True, timeout=30)
         response.raise_for_status()
         
-        # Create SSE client
-        client = SSEClient(response)
+        # Debug: Check response type
+        print(f"[DEBUG] Response type: {type(response)}")
+        print(f"[DEBUG] Response status: {response.status_code}")
+        print(f"[DEBUG] Response headers: {response.headers}")
         
-        # Process events
-        for event in client.events():
-            if event.event == 'tool_call_start':
-                data = json.loads(event.data)
-                yield f"🔧 {data.get('message', 'Starting tool call...')}\n\n"
-            elif event.event == 'tool_call_complete':
-                data = json.loads(event.data)
-                yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
-            elif event.event == 'progress':
-                data = json.loads(event.data)
-                details = data.get('details', {})
-                phase = details.get('phase', '')
-                
-                # Handle different phases with rich formatting
-                if phase == 'llm_request':
+        # Manual SSE parsing
+        event_count = 0
+        current_event = None
+        current_data = []
+        
+        # Process SSE stream line by line
+        for line in response.iter_lines():
+            if not line:
+                # Empty line signals end of an event
+                if current_event and current_data:
+                    # Process the completed event
+                    event_count += 1
+                    data_str = '\n'.join(current_data)
+                    print(f"[DEBUG] Event #{event_count}: type={current_event}, data_length={len(data_str)}")
+                    
+                    # Parse and handle the event
+                    try:
+                        # Handle different event types
+                        if current_event == 'tool_call_start':
+                            data = json.loads(data_str)
+                            yield f"🔧 {data.get('message', 'Starting tool call...')}\n\n"
+                        elif current_event == 'tool_call_complete':
+                            data = json.loads(data_str)
+                            yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
+                        elif current_event == 'progress':
+                            data = json.loads(data_str)
+                            details = data.get('details', {})
+                            phase = details.get('phase', '')
+                            
+                            # Handle different phases with rich formatting
+                            if phase == 'llm_request':
                     messages_sent = details.get('messages', [])
                     yield "\n📤 **Sending to LLM:**\n"
                     for msg in messages_sent[-3:]:  # Show last 3 messages
@@ -51,7 +68,7 @@ def send_to_backend_streaming(messages):
                         yield f"  - **{role}**: {content}\n"
                     yield f"  - Total messages: {details.get('messageCount', 0)}\n\n"
                     
-                elif phase == 'llm_response':
+                            elif phase == 'llm_response':
                     response_text = details.get('response', '')[:500] + '...' if len(details.get('response', '')) > 500 else details.get('response', '')
                     metadata = details.get('metadata', {})
                     yield "\n📥 **LLM Response:**\n"
@@ -59,7 +76,7 @@ def send_to_backend_streaming(messages):
                     yield f"  - Model: {metadata.get('model', 'unknown')}\n"
                     yield f"  - Tokens: {metadata.get('totalTokens', 0)} (prompt: {metadata.get('promptTokens', 0)}, completion: {metadata.get('completionTokens', 0)})\n\n"
                     
-                elif phase == 'sql_query':
+                            elif phase == 'sql_query':
                     query = details.get('query', '')
                     tables = details.get('tables', [])
                     yield "\n🔍 **SQL Query:**\n"
@@ -68,7 +85,7 @@ def send_to_backend_streaming(messages):
                         yield f"  - Tables: {', '.join(tables)}\n"
                     yield f"  - Type: {details.get('queryType', 'unknown')}\n\n"
                     
-                elif phase == 'sql_result':
+                            elif phase == 'sql_result':
                     row_count = details.get('rowCount', 0)
                     exec_time = details.get('executionTime', 0)
                     preview = details.get('preview', [])
@@ -81,67 +98,111 @@ def send_to_backend_streaming(messages):
                             yield f"    Row {i+1}: {json.dumps(row, indent=2)}\n"
                     yield "\n"
                     
-                elif phase == 'metadata_exploration':
+                            elif phase == 'metadata_exploration':
                     table = details.get('table', '')
                     col_count = details.get('columnCount', 0)
                     yield "\n🗂️ **Metadata Exploration:**\n"
                     yield f"  - Table: {table}\n"
                     yield f"  - Columns: {col_count}\n\n"
                     
-                elif phase == 'schema_matching':
+                            elif phase == 'schema_matching':
                     matched = details.get('matchedTables', [])
                     yield "\n🔗 **Schema Matching:**\n"
                     yield f"  - User query: {details.get('userQuery', '')}\n"
                     yield f"  - Matched tables: {matched}\n\n"
                     
-                elif phase == 'enum_mapping':
+                            elif phase == 'enum_mapping':
                     column = details.get('column', '')
                     mapping_count = details.get('mappingCount', 0)
                     yield "\n🏷️ **Enumeration Mapping:**\n"
                     yield f"  - Column: {column}\n"
                     yield f"  - Mappings found: {mapping_count}\n\n"
                     
-                elif phase == 'tool_selection':
+                            elif phase == 'tool_selection':
                     strategy = details.get('strategy', '')
                     tools = details.get('selectedTools', [])
                     yield "\n🛠️ **Tool Selection:**\n"
                     yield f"  - Strategy: {strategy}\n"
                     yield f"  - Selected tools: {tools}\n\n"
                     
-                else:
-                    # Default progress display
-                    step = data.get('step', '')
-                    message = data.get('message', '')
-                    elapsed = data.get('elapsed', 0)
-                    yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
+                            else:
+                                # Default progress display
+                                step = data.get('step', '')
+                                message = data.get('message', '')
+                                elapsed = data.get('elapsed', 0)
+                                yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
+                                
+                        elif current_event == 'execution_paused':
+                            data = json.loads(data_str)
+                            yield f"\n⏸️ **Execution Paused**\n"
+                            yield f"Reason: {data.get('reason', 'User requested')}\n"
+                            yield f"{data.get('message', 'Waiting for your input...')}\n\n"
+                            
+                        elif current_event == 'agent_question':
+                            data = json.loads(data_str)
+                            question = data.get('question', '')
+                            options = data.get('options', [])
+                            yield f"\n❓ **Agent Question:**\n"
+                            yield f"{question}\n"
+                            if options:
+                                yield "Options:\n"
+                                for opt in options:
+                                    yield f"  - {opt}\n"
+                            yield "\n"
+                            
+                        elif current_event == 'connected':
+                            # Handle connection event
+                            try:
+                                data = json.loads(data_str)
+                                stream_id = data.get('streamId', 'unknown')
+                                yield f"🔗 Connected to stream: {stream_id}\n\n"
+                            except:
+                                pass
+                        elif current_event == 'final_response':
+                            try:
+                                data = json.loads(data_str)
+                                content = data.get('content', '')
+                                yield content
+                                return  # Exit the generator
+                            except json.JSONDecodeError as e:
+                                yield f"❌ Failed to parse final response: {e}\n"
+                                yield f"Raw data: {data_str}\n"
+                                return
+                        elif current_event == 'error':
+                            try:
+                                data = json.loads(data_str)
+                                yield f"❌ Error: {data.get('message', 'Unknown error')}"
+                            except:
+                                yield f"❌ Error event with unparseable data: {data_str}"
+                            return
+                        elif current_event == 'done':
+                            # Handle stream completion
+                            try:
+                                data = json.loads(data_str)
+                                print(f"[DEBUG] Stream completed: {data.get('message', 'Done')}")
+                            except:
+                                pass
+                            return
+                        else:
+                            # Unknown event type
+                            print(f"[DEBUG] Unknown event type: {current_event}")
+                    except Exception as e:
+                        print(f"[DEBUG] Error handling event: {e}")
+                        print(f"[DEBUG] Event type: {current_event}, Data: {data_str[:200]}")
                     
-            elif event.event == 'execution_paused':
-                data = json.loads(event.data)
-                yield f"\n⏸️ **Execution Paused**\n"
-                yield f"Reason: {data.get('reason', 'User requested')}\n"
-                yield f"{data.get('message', 'Waiting for your input...')}\n\n"
-                
-            elif event.event == 'agent_question':
-                data = json.loads(event.data)
-                question = data.get('question', '')
-                options = data.get('options', [])
-                yield f"\n❓ **Agent Question:**\n"
-                yield f"{question}\n"
-                if options:
-                    yield "Options:\n"
-                    for opt in options:
-                        yield f"  - {opt}\n"
-                yield "\n"
-                
-            elif event.event == 'final_response':
-                data = json.loads(event.data)
-                content = data.get('content', '')
-                yield content
-                break
-            elif event.event == 'error':
-                data = json.loads(event.data)
-                yield f"❌ Error: {data.get('message', 'Unknown error')}"
-                break
+                    # Reset for next event
+                    current_event = None
+                    current_data = []
+                continue
+            
+            # Decode the line
+            line = line.decode('utf-8') if isinstance(line, bytes) else line
+            
+            # Parse SSE format
+            if line.startswith('event: '):
+                current_event = line[7:].strip()
+            elif line.startswith('data: '):
+                current_data.append(line[6:])
                 
     except requests.exceptions.ConnectionError:
         yield "❌ Backend server not running. Please start Agents-MCP-Host on port 8080."
@@ -153,8 +214,11 @@ def send_to_backend_streaming(messages):
         yield f"❌ Backend error: {error_detail}"
     except requests.exceptions.Timeout:
         yield "❌ Request timed out. The backend took too long to respond."
+    except json.JSONDecodeError as e:
+        yield f"❌ Error parsing JSON: {e}\nRaw data: {event.data[:200] if event.data else 'None'}"
     except Exception as e:
-        yield f"❌ Unexpected error: {str(e)}"
+        import traceback
+        yield f"❌ Unexpected error: {str(e)}\n{traceback.format_exc()}"
 
 
 # create opening message exchanges
