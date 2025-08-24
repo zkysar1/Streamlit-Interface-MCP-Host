@@ -60,13 +60,13 @@ def send_to_backend_streaming(messages):
                             
                             # Handle different phases with rich formatting
                             if phase == 'llm_request':
-                    messages_sent = details.get('messages', [])
-                    yield "\n📤 **Sending to LLM:**\n"
-                    for msg in messages_sent[-3:]:  # Show last 3 messages
-                        role = msg.get('role', 'unknown')
-                        content = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
-                        yield f"  - **{role}**: {content}\n"
-                    yield f"  - Total messages: {details.get('messageCount', 0)}\n\n"
+                                messages_sent = details.get('messages', [])
+                                yield "\n📤 **Sending to LLM:**\n"
+                                for msg in messages_sent[-3:]:  # Show last 3 messages
+                                    role = msg.get('role', 'unknown')
+                                    content = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
+                                    yield f"  - **{role}**: {content}\n"
+                                yield f"  - Total messages: {details.get('messageCount', 0)}\n\n"
                     
                             elif phase == 'llm_response':
                     response_text = details.get('response', '')[:500] + '...' if len(details.get('response', '')) > 500 else details.get('response', '')
