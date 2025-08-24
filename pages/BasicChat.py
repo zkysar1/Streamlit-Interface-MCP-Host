@@ -38,10 +38,101 @@ def send_to_backend_streaming(messages):
                 yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
             elif event.event == 'progress':
                 data = json.loads(event.data)
-                step = data.get('step', '')
-                message = data.get('message', '')
-                elapsed = data.get('elapsed', 0)
-                yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
+                details = data.get('details', {})
+                phase = details.get('phase', '')
+                
+                # Handle different phases with rich formatting
+                if phase == 'llm_request':
+                    messages_sent = details.get('messages', [])
+                    yield "\n📤 **Sending to LLM:**\n"
+                    for msg in messages_sent[-3:]:  # Show last 3 messages
+                        role = msg.get('role', 'unknown')
+                        content = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
+                        yield f"  - **{role}**: {content}\n"
+                    yield f"  - Total messages: {details.get('messageCount', 0)}\n\n"
+                    
+                elif phase == 'llm_response':
+                    response_text = details.get('response', '')[:500] + '...' if len(details.get('response', '')) > 500 else details.get('response', '')
+                    metadata = details.get('metadata', {})
+                    yield "\n📥 **LLM Response:**\n"
+                    yield f"  - Response: {response_text}\n"
+                    yield f"  - Model: {metadata.get('model', 'unknown')}\n"
+                    yield f"  - Tokens: {metadata.get('totalTokens', 0)} (prompt: {metadata.get('promptTokens', 0)}, completion: {metadata.get('completionTokens', 0)})\n\n"
+                    
+                elif phase == 'sql_query':
+                    query = details.get('query', '')
+                    tables = details.get('tables', [])
+                    yield "\n🔍 **SQL Query:**\n"
+                    yield f"```sql\n{query}\n```\n"
+                    if tables:
+                        yield f"  - Tables: {', '.join(tables)}\n"
+                    yield f"  - Type: {details.get('queryType', 'unknown')}\n\n"
+                    
+                elif phase == 'sql_result':
+                    row_count = details.get('rowCount', 0)
+                    exec_time = details.get('executionTime', 0)
+                    preview = details.get('preview', [])
+                    yield "\n📊 **SQL Results:**\n"
+                    yield f"  - Rows returned: {row_count}\n"
+                    yield f"  - Execution time: {exec_time}ms\n"
+                    if preview:
+                        yield "  - Preview:\n"
+                        for i, row in enumerate(preview[:3]):
+                            yield f"    Row {i+1}: {json.dumps(row, indent=2)}\n"
+                    yield "\n"
+                    
+                elif phase == 'metadata_exploration':
+                    table = details.get('table', '')
+                    col_count = details.get('columnCount', 0)
+                    yield "\n🗂️ **Metadata Exploration:**\n"
+                    yield f"  - Table: {table}\n"
+                    yield f"  - Columns: {col_count}\n\n"
+                    
+                elif phase == 'schema_matching':
+                    matched = details.get('matchedTables', [])
+                    yield "\n🔗 **Schema Matching:**\n"
+                    yield f"  - User query: {details.get('userQuery', '')}\n"
+                    yield f"  - Matched tables: {matched}\n\n"
+                    
+                elif phase == 'enum_mapping':
+                    column = details.get('column', '')
+                    mapping_count = details.get('mappingCount', 0)
+                    yield "\n🏷️ **Enumeration Mapping:**\n"
+                    yield f"  - Column: {column}\n"
+                    yield f"  - Mappings found: {mapping_count}\n\n"
+                    
+                elif phase == 'tool_selection':
+                    strategy = details.get('strategy', '')
+                    tools = details.get('selectedTools', [])
+                    yield "\n🛠️ **Tool Selection:**\n"
+                    yield f"  - Strategy: {strategy}\n"
+                    yield f"  - Selected tools: {tools}\n\n"
+                    
+                else:
+                    # Default progress display
+                    step = data.get('step', '')
+                    message = data.get('message', '')
+                    elapsed = data.get('elapsed', 0)
+                    yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
+                    
+            elif event.event == 'execution_paused':
+                data = json.loads(event.data)
+                yield f"\n⏸️ **Execution Paused**\n"
+                yield f"Reason: {data.get('reason', 'User requested')}\n"
+                yield f"{data.get('message', 'Waiting for your input...')}\n\n"
+                
+            elif event.event == 'agent_question':
+                data = json.loads(event.data)
+                question = data.get('question', '')
+                options = data.get('options', [])
+                yield f"\n❓ **Agent Question:**\n"
+                yield f"{question}\n"
+                if options:
+                    yield "Options:\n"
+                    for opt in options:
+                        yield f"  - {opt}\n"
+                yield "\n"
+                
             elif event.event == 'final_response':
                 data = json.loads(event.data)
                 content = data.get('content', '')
@@ -84,18 +175,28 @@ assistants_opening_instructions_to_user = '''Okay.'''
 # I have a client challenge about the is restricted data point for these two cusips: 037833DT4 and 037833DT5. 
 # { "clientId": "APGEMINI", "portfolio": "my portfolio", "dataAsOfDate": "2023-05-06", "dataPointNameBeingChallenged": "isRestricted", "entityId": "037833DT4", "marketValuePosition": "10000", "rats": ".05", "tmpi": ".02"}
 
-# Initialize chat history
+# Initialize chat history and state
 if "messages" not in st.session_state:
     st.session_state.messages = []
     # Set base Message to trigger action from user
     st.session_state.messages.append({"role": "System", "content": systems_opening_instructions_to_assistant })
     st.session_state.messages.append({"role": "Assistant", "content": assistants_opening_instructions_to_user })
 
+if "stream_id" not in st.session_state:
+    st.session_state.stream_id = None
+    
+if "is_executing" not in st.session_state:
+    st.session_state.is_executing = False
+
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
     if message["role"] != "System":  # Don't display system messages
         with st.chat_message(message["role"]):
-            st.text(message["role"]+": "+message["content"])
+            # Use markdown for better formatting
+            if message["role"] == "Assistant":
+                st.markdown(message["content"])
+            else:
+                st.text(message["role"]+": "+message["content"])
 
 
 
@@ -127,6 +228,28 @@ def process_command(command):
     return send_to_backend_streaming(messages)
 
 
+# Add stop button and clear button
+col1, col2, col3 = st.columns([1, 1, 4])
+with col1:
+    if st.button("🛑 Stop", disabled=not st.session_state.is_executing, key="stop_btn"):
+        if st.session_state.stream_id:
+            # Send interrupt request
+            try:
+                response = requests.post(
+                    f"http://localhost:8080/host/v1/conversations/{st.session_state.stream_id}/interrupt",
+                    json={"reason": "user_requested"}
+                )
+                st.success("Stop request sent!")
+            except:
+                st.error("Failed to send stop request")
+
+with col2:
+    if st.button("🔄 Clear", key="clear_btn"):
+        st.session_state.messages = [
+            {"role": "System", "content": systems_opening_instructions_to_assistant},
+            {"role": "Assistant", "content": assistants_opening_instructions_to_user}
+        ]
+        st.rerun()
 
 # React to user input
 if prompt := st.chat_input("Paste Context or answers or questions. . ."):
