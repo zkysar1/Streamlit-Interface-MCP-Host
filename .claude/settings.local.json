@@ -8,7 +8,10 @@
       "Bash(apt-get install:*)",
       "Bash(sudo apt-get:*)",
       "Bash(export PATH=\"$HOME/.local/bin:$PATH\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(mkdir:*)",
+      "Bash(grep:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []
