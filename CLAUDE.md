@@ -4,106 +4,175 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Streamlit-based chat interface that connects to the Agents-MCP-Host backend API. The application provides a web-based chat interface with real-time SSE streaming for tool call notifications.
+This is a Streamlit-based chat interface that connects to the Agents-MCP-Host backend API. The application provides a web-based chat interface with real-time SSE streaming for tool call notifications, featuring smart progress management and persistent streaming state.
 
-## Key Commands
+## Quick Start
 
-### Running the Application
-
-From WSL:
 ```bash
-# Ensure pip packages are installed
+# From WSL/Linux
 export PATH="$HOME/.local/bin:$PATH"
 python3 -m pip install --user --break-system-packages -r requirements.txt
-
-# Run the application
 python3 -m streamlit run Home.py
+
+# From Windows
+python -m streamlit run Home.py
 ```
 
-From Windows PowerShell/Command Prompt:
-```bash
-python -m streamlit run "C:\Users\zkysa\OneDrive\Zak\SmartNPCs\MCPThink\Streamlit-Interface-MCP-Host\Home.py"
-```
+The app runs on http://localhost:8501 and requires the Java backend on port 8080.
 
-### Installing Dependencies
-
-In WSL (requires --break-system-packages flag due to system Python):
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-python3 -m pip install --user --break-system-packages -r requirements.txt
-```
-
-Required packages:
-- `streamlit` - Web UI framework
-- `requests` - HTTP client for backend communication
-- `sseclient-py` - SSE client for streaming responses
-- `psutil` - System information display
-
-## Architecture
+## Architecture Overview
 
 ### Core Components
 
-1. **Home.py**: Main entry point, displays system statistics (CPU, memory, disk usage)
+1. **Home.py**: Entry point with system stats display
+2. **pages/BasicChat.py**: Main chat interface with advanced features:
+   - Persistent streaming sessions across reruns
+   - Dynamic verbosity control (Minimal/Normal/Detailed)
+   - Smart progress display with in-place updates
+   - Floating control buttons within messages
+   - Collapsible technical details
 
-2. **pages/BasicChat.py**: Chat interface page that:
-   - Sends messages to Agents-MCP-Host backend via HTTP
-   - Uses SSE streaming for real-time tool notifications
-   - Manages conversation history in Streamlit session state
-   - Displays progressive updates with `st.write_stream()`
+### Key Classes
 
-### Key Implementation Details
+#### StreamingSession (lines 19-82)
+Manages persistent streaming state across Streamlit reruns:
+- Stores all events for replay with different verbosity
+- Tracks completed tools and current phase
+- Handles timeout detection (10 min default)
+- Maintains error state
 
-- **Backend Integration**: Uses `requests` library for HTTP communication with Agents-MCP-Host
-- **SSE Streaming**: Uses `sseclient-py` to process Server-Sent Events from backend
-- **Session Management**: Chat history stored in `st.session_state.messages` with role-based structure
-- **Message Format**: Messages include roles: "System", "User", "Assistant"
-- **Streaming Display**: Shows tool call notifications (🔧), completions (✓), and final responses
-- **Error Handling**: Graceful fallback when backend is unavailable
+#### ProgressManager (lines 84-232)
+Handles intelligent progress display:
+- Single updating line instead of spam
+- Long-running operation detection (30s threshold)
+- Progress bar when step info available
+- Safe handling of None data
 
-### SSE Streaming Flow
+### Critical Implementation Details
 
-1. User sends message
-2. Frontend adds `Accept: text/event-stream` header
-3. Backend streams events:
-   - `tool_call_start` - Shows "🔧 Calling tool..."
-   - `tool_call_complete` - Shows "✓ Tool completed"
-   - `final_response` - Shows actual response
-4. Frontend uses `st.empty()` and `st.markdown()` for progressive display
+#### State Persistence Strategy
+```python
+# Each message gets a unique ID linking to its streaming session
+message_id = str(uuid.uuid4())
+st.session_state.active_streams[message_id] = StreamingSession(message_id)
 
-## Environment Requirements
-
-- **Backend Service**: Agents-MCP-Host must be running on port 8080
-- **Python Dependencies**: streamlit, requests, sseclient-py, psutil (see requirements.txt)
-- **No API Keys Required**: Backend handles all AI/LLM interactions
-
-## Directory Locations
-
-- Windows WSL: `/mnt/c/Users/zkysa/OneDrive/Zak/SmartNPCs/MCPThink/Streamlit-Interface-MCP-Host/`
-- Linux/Mac: `~/ZAK-Agent/`
-
-## Development Notes
-
-- **Main Functions**:
-  - `send_to_backend_streaming()` - Handles SSE communication with backend
-  - `process_command()` - Orchestrates message processing and streaming
-- **Streaming Logic**: The response generator yields chunks that are progressively displayed
-- **Backend URL**: Hardcoded to `http://localhost:8080/host/v1/conversations`
-- The application runs on port 8501 by default
-- Streamlit configuration can be found in `~/.streamlit/config.toml` (if created)
-
-## Testing
-
-```bash
-# Test SSE streaming functionality
-python3 test_streaming.py
-
-# Test full integration
-python3 test_integration.py
+# Messages store their ID for rebuilding
+st.session_state.messages.append({
+    "role": "Assistant",
+    "content": full_response,
+    "message_id": message_id  # Key for persistence!
+})
 ```
 
-## Troubleshooting
+#### Verbosity Slider Fix
+The app rebuilds displays from stored events when verbosity changes:
+1. All events stored in StreamingSession.events
+2. get_display_events() filters based on current verbosity
+3. rebuild_response_display() reconstructs the UI
+4. No loss of data during slider changes!
 
-- **"Backend server not running"**: Start Agents-MCP-Host first
-- **No streaming**: Check that `sseclient-py` is installed
-- **Events not showing**: Verify Accept header is being sent
-- **Connection drops**: Check for proxy/firewall blocking SSE
+#### Memory Management
+- Max 20 active streams (older ones removed)
+- 5-minute cleanup for inactive streams
+- 10-minute timeout for stuck streams
+- Automatic marking as stale with is_stale() method
+
+### Event Types and Display Logic
+
+| Event Type | Minimal | Normal | Detailed | Notes |
+|------------|---------|---------|----------|-------|
+| connected | ❌ | ❌ | ✅ | Stream ID only |
+| progress | ❌ | ❌ | ✅ | All progress events |
+| tool_call_start | ❌ | ✅ | ✅ | Shows tool name |
+| tool_call_complete | ❌ | ✅ | ✅ | Just checkmark |
+| execution_paused | ✅ | ✅ | ✅ | Always shown |
+| agent_question | ✅ | ✅ | ✅ | User interaction |
+| error | ✅ | ✅ | ✅ | Always prominent |
+| final_response | ✅ | ✅ | ✅ | Main content |
+
+### SSE Streaming Architecture
+
+```
+User Input → process_command() → send_to_backend_streaming()
+                ↓                           ↓
+         StreamingSession            SSE Event Stream
+                ↓                           ↓
+         Store all events          Parse and yield events
+                ↓                           ↓
+         ProgressManager ← handle_event() ← Event data
+                ↓
+         Update display (in-place)
+```
+
+### Recent Improvements (December 2024)
+
+1. **Fixed AttributeError**: Added None checks throughout handle_event()
+2. **Memory leak prevention**: Added stream limits and cleanup
+3. **Consistent error formatting**: Fixed rebuild_response_display returns
+4. **Code deduplication**: Created show_technical_details() helper
+5. **Button key fixes**: Use message_id instead of index
+6. **Stale stream handling**: Auto-timeout after 10 minutes
+
+## Common Development Tasks
+
+### Adding a New Event Type
+1. Add to StreamingSession.add_event() for state updates
+2. Add to ProgressManager.handle_event() for display
+3. Update important_events set if always visible
+4. Add to get_display_events() filtering logic
+
+### Modifying Progress Display
+- Edit update_progress() in ProgressManager
+- The progress_placeholder uses st.empty() for in-place updates
+- Check elapsed time for long-running detection
+
+### Debugging Streaming Issues
+```python
+# Enable debug prints in send_to_backend_streaming()
+print(f"[DEBUG] Event: {current_event}, Data: {data_str}")
+
+# Check streaming session state
+print(f"Session {message_id}: active={session.is_active}, events={len(session.events)}")
+```
+
+## Testing Scenarios
+
+### Manual Testing Checklist
+- [ ] Start a long query, change verbosity mid-stream
+- [ ] Multiple concurrent messages with different verbosity
+- [ ] Error handling with backend down
+- [ ] Stop button during active streaming
+- [ ] Page refresh during streaming
+- [ ] 20+ messages to test cleanup
+
+### Edge Cases to Test
+1. **Verbosity changes**: Should rebuild without data loss
+2. **Timeout handling**: 10-minute streams should auto-stop
+3. **Memory cleanup**: Old streams should be removed
+4. **Button conflicts**: Each stop button should be unique
+5. **None data**: All event handlers should handle None
+
+## Troubleshooting Guide
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| AttributeError on .get() | None data passed to event handlers | Check isinstance(data, dict) first |
+| Response disappears | Streamlit rerun without state | Use StreamingSession for persistence |
+| Duplicate stop buttons | Key collision with index | Use message_id for keys |
+| Memory growth | No stream cleanup | Check cleanup logic runs |
+| Stuck "Streaming..." | No final_response event | Check is_stale() timeout |
+
+## Performance Considerations
+
+- Each StreamingSession stores all events (memory grows with conversation length)
+- Technical details show last 20 events only (performance cap)
+- Progress updates use st.empty() for efficiency
+- Verbosity checks prevent unnecessary processing
+
+## Future Enhancements
+
+1. **Event compression**: Store only essential data after completion
+2. **Pagination**: For very long conversations
+3. **Export functionality**: Save chat with full event history
+4. **Custom themes**: Based on verbosity level
+5. **WebSocket upgrade**: Replace SSE for bidirectional communication

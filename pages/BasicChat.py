@@ -6,6 +6,7 @@ import streamlit as st
 import time
 from datetime import datetime
 import uuid
+from typing import Dict, List, Optional, Tuple
 
 
 st.title("Client Holding Challenge Agent")
@@ -15,17 +16,98 @@ Zak Kysar *DRAFT*
 """)
 
 
+class StreamingSession:
+    """Stores streaming state that persists across Streamlit reruns"""
+    
+    def __init__(self, message_id: str):
+        self.message_id = message_id
+        self.events: List[Dict] = []
+        self.is_active = True
+        self.final_response: Optional[str] = None
+        self.error: Optional[str] = None
+        self.start_time = time.time()
+        self.stream_id: Optional[str] = None
+        self.completed_tools: List[str] = []
+        self.current_phase = "Starting"
+        self.current_tool = None
+        self.step_info = {}
+        
+    def is_stale(self, timeout_seconds: int = 600) -> bool:
+        """Check if stream has been active too long without completion"""
+        if self.is_active and (time.time() - self.start_time) > timeout_seconds:
+            return True
+        return False
+        
+    def add_event(self, event_type: str, data):
+        """Add an event to the session history"""
+        self.events.append({
+            'type': event_type,
+            'data': data,
+            'timestamp': time.time() - self.start_time
+        })
+        
+        # Update session state based on event
+        if event_type == 'connected':
+            if isinstance(data, str):
+                self.stream_id = data
+            elif isinstance(data, dict) and data is not None:
+                self.stream_id = data.get('streamId')
+        elif event_type == 'tool_call_complete':
+            if isinstance(data, dict) and data is not None:
+                tool_name = data.get('tool', '').replace('oracle__', '').replace('_', ' ').title()
+                if tool_name and tool_name not in self.completed_tools:
+                    self.completed_tools.append(tool_name)
+        elif event_type == 'final_response':
+            if isinstance(data, str):
+                self.final_response = data
+            elif isinstance(data, dict) and data is not None:
+                self.final_response = data.get('content', '')
+            self.is_active = False
+        elif event_type == 'error':
+            if isinstance(data, dict) and data is not None:
+                self.error = data.get('message', 'Unknown error')
+            self.is_active = False
+            
+    def get_display_events(self, verbosity: str) -> List[Dict]:
+        """Filter events based on verbosity level"""
+        if verbosity == 'Minimal':
+            # Only show final response and errors
+            return [e for e in self.events if e['type'] in ['final_response', 'error']]
+        elif verbosity == 'Normal':
+            # Show important events
+            important_types = {
+                'tool_call_start', 'tool_call_complete', 
+                'execution_paused', 'agent_question', 
+                'error', 'final_response'
+            }
+            return [e for e in self.events if e['type'] in important_types]
+        else:  # Detailed
+            # Show all events
+            return self.events
+
+
 class ProgressManager:
     """Manages progress display with minimal verbosity and smart updates"""
     
-    def __init__(self, container):
+    def __init__(self, container, session: Optional[StreamingSession] = None):
         self.container = container
         self.progress_placeholder = container.empty()
-        self.start_time = time.time()
-        self.current_phase = "Starting"
-        self.current_tool = None
-        self.completed_tools = []
-        self.step_info = {}
+        self.session = session
+        
+        # Initialize from session if available
+        if session:
+            self.start_time = session.start_time
+            self.current_phase = session.current_phase
+            self.current_tool = session.current_tool
+            self.completed_tools = session.completed_tools.copy()
+            self.step_info = session.step_info.copy()
+        else:
+            self.start_time = time.time()
+            self.current_phase = "Starting"
+            self.current_tool = None
+            self.completed_tools = []
+            self.step_info = {}
+            
         self.is_long_running = False
         self.error_occurred = False
         
@@ -35,24 +117,19 @@ class ProgressManager:
             'execution_paused', 'agent_question', 'error'
         }
         
-        # Verbose event types to collect but not display immediately
-        self.verbose_events = {
-            'tool_routing', 'tool_execution', 'tool_analysis',
-            'intent_analysis', 'tool_selection'
-        }
-        
-        # Details for collapsible section
-        self.details = []
-        
     def update_progress(self, phase=None, tool=None):
         """Update the progress display in place"""
         elapsed = time.time() - self.start_time
         
         if phase:
             self.current_phase = phase
+            if self.session:
+                self.session.current_phase = phase
         if tool:
             self.current_tool = tool
-            
+            if self.session:
+                self.session.current_tool = tool
+                
         with self.progress_placeholder.container():
             # Check if operation is taking long
             if elapsed > 30 and not self.is_long_running:
@@ -92,60 +169,68 @@ class ProgressManager:
     def handle_event(self, event_type, data):
         """Process incoming SSE events with smart filtering"""
         
-        # Always collect details for debugging
-        self.details.append({
-            'time': time.time() - self.start_time,
-            'type': event_type,
-            'data': data
-        })
-        
         # Handle different event types
         if event_type == 'progress':
             # Extract meaningful information from progress events
-            details = data.get('details', {})
-            phase = details.get('phase', '')
-            step = data.get('step', '')
-            
-            # Update step information if available
-            if 'currentStep' in details:
-                self.step_info['currentStep'] = details['currentStep']
-            if 'totalSteps' in details:
-                self.step_info['totalSteps'] = details['totalSteps']
+            if isinstance(data, dict) and data is not None:
+                details = data.get('details', {})
+                phase = details.get('phase', '')
+                step = data.get('step', '')
                 
-            # Handle specific phases
-            if phase in ['llm_request', 'llm_response', 'sql_query', 'sql_result']:
-                self.update_progress(phase=phase.replace('_', ' ').title())
-            elif step and 'oracle_full_pipeline' not in step:
-                # Avoid showing the repetitive pipeline messages
-                self.update_progress(phase=step)
+                # Update step information if available
+                if 'currentStep' in details:
+                    self.step_info['currentStep'] = details['currentStep']
+                    if self.session:
+                        self.session.step_info['currentStep'] = details['currentStep']
+                if 'totalSteps' in details:
+                    self.step_info['totalSteps'] = details['totalSteps']
+                    if self.session:
+                        self.session.step_info['totalSteps'] = details['totalSteps']
+                        
+                # Handle specific phases
+                if phase in ['llm_request', 'llm_response', 'sql_query', 'sql_result']:
+                    self.update_progress(phase=phase.replace('_', ' ').title())
+                elif step and 'oracle_full_pipeline' not in step:
+                    # Avoid showing the repetitive pipeline messages
+                    self.update_progress(phase=step)
                 
         elif event_type == 'tool_call_start':
-            tool_name = data.get('tool', '').replace('oracle__', '').replace('_', ' ').title()
-            self.current_tool = tool_name
-            self.update_progress(phase="Executing", tool=tool_name)
-            return f"🔧 {tool_name}\n"
+            if isinstance(data, dict) and data is not None:
+                tool_name = data.get('tool', '').replace('oracle__', '').replace('_', ' ').title()
+                self.current_tool = tool_name
+                self.update_progress(phase="Executing", tool=tool_name)
+                return f"🔧 {tool_name}\n"
             
         elif event_type == 'tool_call_complete':
-            tool_name = data.get('tool', '').replace('oracle__', '').replace('_', ' ').title()
-            self.completed_tools.append(tool_name)
-            # Just add a checkmark, don't create new line
-            return "✓ "
+            if isinstance(data, dict) and data is not None:
+                tool_name = data.get('tool', '').replace('oracle__', '').replace('_', ' ').title()
+                if tool_name not in self.completed_tools:
+                    self.completed_tools.append(tool_name)
+                # Just add a checkmark, don't create new line
+                return "✓ "
             
         elif event_type == 'execution_paused':
-            return f"\n⏸️ **{data.get('message', 'Paused')}**\n\n"
+            if isinstance(data, dict) and data is not None:
+                return f"\n⏸️ **{data.get('message', 'Paused')}**\n\n"
+            return f"\n⏸️ **Paused**\n\n"
             
         elif event_type == 'agent_question':
-            question = data.get('question', '')
-            options = data.get('options', [])
-            result = f"\n❓ **{question}**\n"
-            if options:
-                for opt in options:
-                    result += f"  • {opt}\n"
-            return result + "\n"
+            if isinstance(data, dict) and data is not None:
+                question = data.get('question', '')
+                options = data.get('options', [])
+                result = f"\n❓ **{question}**\n"
+                if options:
+                    for opt in options:
+                        result += f"  • {opt}\n"
+                return result + "\n"
             
         elif event_type == 'error':
             self.error_occurred = True
-            return f"\n❌ **Error**: {data.get('message', 'Unknown error')}\n"
+            if isinstance(data, dict) and data is not None:
+                return f"\n❌ **Error**: {data.get('message', 'Unknown error')}\n"
+            elif isinstance(data, str):
+                return f"\n❌ **Error**: {data}\n"
+            return f"\n❌ **Error**: Unknown error\n"
             
         # Return None for events that shouldn't display immediately
         return None
@@ -192,11 +277,12 @@ def send_to_backend_streaming(messages, message_id):
                         if current_event == 'connected':
                             data = json.loads(data_str)
                             stream_id = data.get('streamId', 'unknown')
-                            yield ('connected', stream_id, None)
+                            yield ('connected', stream_id, data)
                             
                         elif current_event == 'final_response':
                             data = json.loads(data_str)
-                            yield ('final_response', None, data.get('content', ''))
+                            content = data.get('content', '')
+                            yield ('final_response', None, content)
                             return
                             
                         elif current_event == 'error':
@@ -242,8 +328,112 @@ def send_to_backend_streaming(messages, message_id):
         yield ('error', None, {'message': f'Unexpected error: {str(e)}'})
 
 
+def show_technical_details(container, streaming_session, progress_manager):
+    """Display technical details in an expander"""
+    with container:
+        with st.expander("📋 Technical Details", expanded=False):
+            st.caption("Event Timeline")
+            for event in streaming_session.events[-20:]:  # Last 20 events
+                if event['type'] in progress_manager.important_events:
+                    st.markdown(f"**{event['timestamp']:.1f}s** - {event['type']}")
+                else:
+                    st.caption(f"{event['timestamp']:.1f}s - {event['type']}")
+            
+            if streaming_session.completed_tools:
+                st.markdown("**Tools Used:**")
+                for tool in streaming_session.completed_tools:
+                    st.write(f"• {tool}")
+
+
+def rebuild_response_display(streaming_session: StreamingSession, container, verbosity: str):
+    """Rebuild the response display from stored events"""
+    progress_container = container.container()
+    response_container = container.container()
+    details_container = container.container()
+    
+    # Initialize progress manager with session data
+    progress_manager = ProgressManager(progress_container, streaming_session)
+    
+    # Get filtered events based on verbosity
+    display_events = streaming_session.get_display_events(verbosity)
+    
+    # Rebuild the display
+    response_parts = []
+    
+    for event in display_events:
+        event_type = event['type']
+        data = event['data']
+        
+        if event_type == 'final_response':
+            # Clear progress and show final response
+            progress_manager.clear()
+            
+            # Show summary if tools were used
+            if streaming_session.completed_tools:
+                with response_container:
+                    st.caption(f"✅ {progress_manager.get_summary()}")
+                    st.markdown("---")
+                    
+            # Display final response
+            with response_container:
+                st.markdown(streaming_session.final_response)
+                
+            # Add details expander if not minimal
+            if len(streaming_session.events) > 1 and verbosity != 'Minimal':
+                show_technical_details(details_container, streaming_session, progress_manager)
+                                
+        elif event_type == 'error':
+            progress_manager.clear()
+            with response_container:
+                error_msg = 'Unknown error'
+                if isinstance(data, dict) and data is not None:
+                    error_msg = data.get('message', 'Unknown error')
+                elif isinstance(data, str):
+                    error_msg = data
+                st.error(error_msg)
+                
+        else:
+            # Process progress event
+            if verbosity != 'Minimal':  # Check verbosity before processing
+                display_text = progress_manager.handle_event(event_type, data)
+                if display_text:
+                    response_parts.append(display_text)
+                
+    # Show accumulated response parts if no final response yet
+    if not streaming_session.final_response and not streaming_session.error:
+        with response_container:
+            if response_parts:
+                st.markdown(''.join(response_parts))
+                
+        # Update progress if still active
+        if streaming_session.is_active:
+            progress_manager.update_progress()
+            
+    if streaming_session.final_response:
+        return streaming_session.final_response
+    elif streaming_session.error:
+        return f"Error: {streaming_session.error}"
+    else:
+        return "Streaming..."
+
+
 def process_command(command, message_container, message_id):
-    """Process user command with improved streaming display"""
+    """Process user command with improved streaming display and state persistence"""
+    
+    # Check if we're resuming an existing stream
+    if message_id in st.session_state.get('active_streams', {}):
+        streaming_session = st.session_state.active_streams[message_id]
+        
+        # If already completed, just rebuild the display
+        if not streaming_session.is_active:
+            return rebuild_response_display(streaming_session, message_container, 
+                                          st.session_state.get('verbosity', 'Normal'))
+    else:
+        # Create new streaming session
+        streaming_session = StreamingSession(message_id)
+        if 'active_streams' not in st.session_state:
+            st.session_state.active_streams = {}
+        st.session_state.active_streams[message_id] = streaming_session
     
     # Build messages for backend API
     messages = []
@@ -270,16 +460,19 @@ def process_command(command, message_container, message_id):
     details_container = message_container.container()
     
     # Initialize progress manager
-    progress_manager = ProgressManager(progress_container)
+    progress_manager = ProgressManager(progress_container, streaming_session)
     
     # Container for accumulating the actual response
     response_parts = []
     
-    # Track if we've shown any tool output
-    tool_output_shown = False
+    # Get current verbosity
+    verbosity = st.session_state.get('verbosity', 'Normal')
     
     # Stream from backend
     for event_type, stream_id, data in send_to_backend_streaming(messages, message_id):
+        # Store event in session
+        streaming_session.add_event(event_type, data)
+        
         if event_type == 'connected':
             st.session_state.stream_id = stream_id
             st.session_state.is_executing = True
@@ -299,25 +492,8 @@ def process_command(command, message_container, message_id):
                 st.markdown(data)
                 
             # Add collapsible details if available and verbosity allows
-            if progress_manager.details and st.session_state.get('verbosity', 'Normal') != 'Minimal':
-                with details_container:
-                    with st.expander("📋 Technical Details", expanded=False):
-                        st.caption("Event Timeline")
-                        for detail in progress_manager.details[-20:]:  # Show last 20 events
-                            event_type = detail['type']
-                            elapsed = detail['time']
-                            
-                            # Format based on event type
-                            if event_type in progress_manager.important_events:
-                                st.markdown(f"**{elapsed:.1f}s** - {event_type}")
-                            else:
-                                st.caption(f"{elapsed:.1f}s - {event_type}")
-                        
-                        # Show tools used
-                        if progress_manager.completed_tools:
-                            st.markdown("**Tools Used:**")
-                            for tool in progress_manager.completed_tools:
-                                st.write(f"• {tool}")
+            if streaming_session.events and verbosity != 'Minimal':
+                show_technical_details(details_container, streaming_session, progress_manager)
                 
             st.session_state.is_executing = False
             return data
@@ -325,20 +501,21 @@ def process_command(command, message_container, message_id):
         elif event_type == 'error':
             progress_manager.clear()
             with response_container:
-                st.error(data.get('message', 'Unknown error'))
+                error_msg = 'Unknown error'
+                if isinstance(data, dict) and data is not None:
+                    error_msg = data.get('message', 'Unknown error')
+                elif isinstance(data, str):
+                    error_msg = data
+                st.error(error_msg)
             st.session_state.is_executing = False
-            return f"Error: {data.get('message', 'Unknown error')}"
+            return f"Error: {error_msg}"
             
         else:
-            # Process progress event based on verbosity
-            verbosity = st.session_state.get('verbosity', 'Normal')
-            
             # Always process events for progress tracking
             display_text = progress_manager.handle_event(event_type, data)
             
             # Show important events based on verbosity level
             if display_text and verbosity != 'Minimal':
-                tool_output_shown = True
                 response_parts.append(display_text)
                 with response_container:
                     st.markdown(''.join(response_parts))
@@ -364,33 +541,67 @@ if "stream_id" not in st.session_state:
 if "is_executing" not in st.session_state:
     st.session_state.is_executing = False
 
+# Clean up old completed streams (older than 5 minutes) and enforce maximum
+if "active_streams" in st.session_state:
+    current_time = time.time()
+    streams_to_remove = []
+    
+    # Remove old inactive streams
+    for msg_id, session in st.session_state.active_streams.items():
+        # Mark as inactive if stuck streaming for over 10 minutes
+        if session.is_stale(600):
+            session.is_active = False
+            session.error = "Stream timed out"
+        
+        # Remove if inactive and older than 5 minutes
+        if not session.is_active and (current_time - session.start_time) > 300:
+            streams_to_remove.append(msg_id)
+    
+    # Remove oldest streams if we exceed maximum (keep last 20)
+    if len(st.session_state.active_streams) > 20:
+        sorted_streams = sorted(st.session_state.active_streams.items(), 
+                              key=lambda x: x[1].start_time)
+        for msg_id, _ in sorted_streams[:-20]:
+            if msg_id not in streams_to_remove:
+                streams_to_remove.append(msg_id)
+    
+    # Perform removal
+    for msg_id in streams_to_remove:
+        del st.session_state.active_streams[msg_id]
+
 # Display chat messages from history
 for i, message in enumerate(st.session_state.messages):
     if message["role"] != "System":  # Don't display system messages
         with st.chat_message(message["role"]):
             if message["role"] == "Assistant":
-                # Create container for message with controls
-                msg_container = st.container()
+                # Check if this message has a streaming session
+                message_id = message.get('message_id')
                 
-                # Display message content
-                with msg_container:
-                    st.markdown(message["content"])
+                if message_id and message_id in st.session_state.get('active_streams', {}):
+                    # Rebuild from streaming session with current verbosity
+                    msg_container = st.container()
+                    streaming_session = st.session_state.active_streams[message_id]
+                    rebuild_response_display(streaming_session, msg_container, 
+                                           st.session_state.get('verbosity', 'Normal'))
                     
-                # Add controls at bottom of this specific message
-                if i == len(st.session_state.messages) - 1 and st.session_state.is_executing:
-                    # Only show controls for the most recent message if executing
-                    col1, col2, col3 = st.columns([1, 1, 4])
-                    with col1:
-                        if st.button("🛑 Stop", key=f"stop_{i}"):
-                            if st.session_state.stream_id:
-                                try:
-                                    response = requests.post(
-                                        f"http://localhost:8080/host/v1/conversations/{st.session_state.stream_id}/interrupt",
-                                        json={"reason": "user_requested"}
-                                    )
-                                    st.success("Stop request sent!")
-                                except:
-                                    st.error("Failed to send stop request")
+                    # Add controls if this is the most recent active message
+                    if i == len(st.session_state.messages) - 1 and streaming_session.is_active:
+                        col1, col2, col3 = st.columns([1, 1, 4])
+                        with col1:
+                            if st.button("🛑 Stop", key=f"stop_{message_id}"):
+                                if streaming_session.stream_id:
+                                    try:
+                                        response = requests.post(
+                                            f"http://localhost:8080/host/v1/conversations/{streaming_session.stream_id}/interrupt",
+                                            json={"reason": "user_requested"}
+                                        )
+                                        st.success("Stop request sent!")
+                                        streaming_session.is_active = False
+                                    except:
+                                        st.error("Failed to send stop request")
+                else:
+                    # Display normally
+                    st.markdown(message["content"])
             else:
                 st.text(message["role"] + ": " + message["content"])
 
@@ -403,6 +614,8 @@ with st.sidebar:
         ]
         st.session_state.is_executing = False
         st.session_state.stream_id = None
+        if "active_streams" in st.session_state:
+            st.session_state.active_streams = {}
         st.rerun()
     
     # Verbosity control
@@ -410,10 +623,15 @@ with st.sidebar:
     verbosity = st.select_slider(
         "Progress detail level",
         options=["Minimal", "Normal", "Detailed"],
-        value="Normal",
+        value=st.session_state.get('verbosity', 'Normal'),
         help="Control how much progress information is shown"
     )
-    st.session_state.verbosity = verbosity
+    
+    # Update verbosity in session state
+    if verbosity != st.session_state.get('verbosity'):
+        st.session_state.verbosity = verbosity
+        # Trigger rerun to update display with new verbosity
+        st.rerun()
 
 # Chat input
 if prompt := st.chat_input("Paste Context or answers or questions..."):
@@ -432,8 +650,12 @@ if prompt := st.chat_input("Paste Context or answers or questions..."):
         # Process the command
         full_response = process_command(prompt, message_container, message_id)
         
-        # Add response to history
-        st.session_state.messages.append({"role": "Assistant", "content": full_response})
+        # Add response to history with message_id for rebuilding
+        st.session_state.messages.append({
+            "role": "Assistant", 
+            "content": full_response,
+            "message_id": message_id
+        })
         
         # Add floating controls at bottom of response
         if st.session_state.is_executing:
@@ -447,5 +669,8 @@ if prompt := st.chat_input("Paste Context or answers or questions..."):
                                 json={"reason": "user_requested"}
                             )
                             st.success("Stop request sent!")
+                            # Mark the current streaming session as inactive
+                            if message_id in st.session_state.active_streams:
+                                st.session_state.active_streams[message_id].is_active = False
                         except:
                             st.error("Failed to send stop request")

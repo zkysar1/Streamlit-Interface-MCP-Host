@@ -1,14 +1,17 @@
 # Streamlit-Interface-MCP-Host
 
-A modern Streamlit chat interface that connects to the Agents-MCP-Host backend, featuring real-time SSE streaming for transparent tool call notifications.
+A sophisticated web-based chat interface for the Agents-MCP-Host backend, featuring real-time SSE streaming, intelligent progress management, and dynamic verbosity control.
 
 ## 🎯 Key Features
 
 - **🔄 Real-time Streaming**: See tool calls as they happen via Server-Sent Events
-- **🔧 Tool Notifications**: Visual indicators for tool execution (🔧 starting, ✓ completed)
-- **💬 Progressive Display**: Messages appear as they're being processed
-- **🚀 No API Keys Required**: Backend handles all AI/LLM interactions
-- **📊 System Monitoring**: Built-in CPU, memory, and disk usage display
+- **📊 Smart Progress Display**: Single updating line instead of spam, with progress bars for multi-step operations
+- **🎚️ Dynamic Verbosity Control**: Change detail level (Minimal/Normal/Detailed) without losing data
+- **💾 Persistent State Management**: Streaming sessions survive page refreshes and reruns
+- **🛑 Floating Control Buttons**: Stop buttons that stay with active responses
+- **📋 Collapsible Technical Details**: Debugging information available on demand
+- **🧹 Automatic Memory Management**: Old streams cleaned up automatically
+- **⏱️ Long Operation Handling**: Special messaging after 30 seconds with timeout protection
 
 
 ## Directory Location
@@ -64,29 +67,40 @@ The interface will open at `http://localhost:8501`
 
 ## 🏗️ Architecture
 
-### Components
+### Core Components
 
 1. **Home.py** - Main entry point with system stats
-2. **pages/BasicChat.py** - Chat interface with SSE streaming
+2. **pages/BasicChat.py** - Advanced chat interface with:
+   - `StreamingSession` class for persistent state
+   - `ProgressManager` class for intelligent display
+   - Verbosity-based event filtering
 
-### SSE Streaming Flow
+### Enhanced Streaming Architecture
 
 ```
-User Input → Streamlit UI → HTTP POST (Accept: text/event-stream)
+User Input → process_command() → send_to_backend_streaming()
+                ↓                           ↓
+         StreamingSession            SSE Event Stream
+         (stores all events)         (real-time updates)
+                ↓                           ↓
+         ProgressManager ← handle_event() ← Event data
+         (filters by verbosity)
                 ↓
-        Agents-MCP-Host Backend
-                ↓
-    SSE Events (tool_call_start, tool_call_complete, final_response)
-                ↓
-        Progressive Display in UI
+         Update display (st.empty() for in-place updates)
 ```
 
-### Event Types
+### Event Types & Verbosity
 
-- `tool_call_start` - Shows "🔧 Calling tool: [tool_name]..."
-- `tool_call_complete` - Shows "✓ Tool completed: [tool_name]"
-- `final_response` - Displays the actual response
-- `error` - Shows error messages with ❌ indicator
+| Event Type | Minimal | Normal | Detailed | Description |
+|------------|---------|---------|----------|-------------|
+| `connected` | ❌ | ❌ | ✅ | Stream connection established |
+| `progress` | ❌ | ❌ | ✅ | Detailed progress updates |
+| `tool_call_start` | ❌ | ✅ | ✅ | Shows "🔧 Tool Name" |
+| `tool_call_complete` | ❌ | ✅ | ✅ | Shows "✓" checkmark |
+| `execution_paused` | ✅ | ✅ | ✅ | User interruption |
+| `agent_question` | ✅ | ✅ | ✅ | Agent needs input |
+| `error` | ✅ | ✅ | ✅ | Error messages with ❌ |
+| `final_response` | ✅ | ✅ | ✅ | The actual response |
 
 ## 📦 Dependencies
 
@@ -113,17 +127,40 @@ python3 test_integration.py
 Type: "Hello, how are you?"
 - Backend uses OpenAI (if configured) or fallback response
 
-### Tool Execution
-Type: "Calculate 42 plus 58"
-- See: 🔧 Calling tool: calculator__add...
-- See: ✓ Tool completed: calculator__add
-- See: Result: 100.0
+### Tool Execution with Progress
+Type: "Show me all pending orders from California customers with high priority"
 
-### Available Tool Triggers
-- **Calculator**: "calculate", "add", "subtract", "multiply", "divide"
-- **Weather**: "weather", "forecast", "temperature"
-- **Database**: "query", "database", "insert", "update", "delete"
-- **Files**: "file", "read file", "write file", "list files"
+**Minimal verbosity shows:**
+```
+The total revenue for Q3 2023 is $12,450,000.
+```
+
+**Normal verbosity shows:**
+```
+🔧 Analyze Query
+✓ 🔧 Match Schema
+✓ 🔧 Generate Sql
+✓ 🔧 Execute Query
+✓ 
+
+✅ Completed in 15.3s • Used 4 tools
+---
+[Results displayed here]
+```
+
+**Detailed verbosity shows:**
+All of the above plus real-time progress updates, SQL queries, and technical details in expandable section.
+
+### Verbosity Control
+Use the sidebar slider to adjust detail level during streaming:
+- **Minimal**: Only final responses and errors
+- **Normal**: Tool executions and completions
+- **Detailed**: All progress events and technical information
+
+### Stop Functionality
+- Click the 🛑 Stop button to interrupt long operations
+- Button appears at the bottom of active responses
+- Sends interrupt signal to backend
 
 ## 🔧 Configuration
 
@@ -145,22 +182,58 @@ Conversation history is maintained in Streamlit's session state with roles:
 |-------|----------|
 | "Backend server not running" | Start Agents-MCP-Host first on port 8080 |
 | No streaming updates | Ensure `sseclient-py` is installed |
+| Response disappears on slider change | Fixed in latest version - uses StreamingSession persistence |
+| AttributeError on .get() | Fixed - added None checks in handle_event() |
+| Duplicate stop buttons | Fixed - uses message_id instead of index for keys |
+| Memory growth | Fixed - automatic cleanup of old streams (max 20) |
+| Stuck "Streaming..." | Fixed - 10-minute timeout for stale streams |
 | Connection drops | Check firewall/proxy settings for SSE |
-| Port already in use | Change Streamlit port: `streamlit run Home.py --server.port 8502` |
+| Port already in use | Change port: `streamlit run Home.py --server.port 8502` |
+
+### Debug Mode
+Enable debug prints by uncommenting lines in BasicChat.py:
+- Line 286 in `send_to_backend_streaming()` for SSE events
+- Add prints in `handle_event()` for event processing
 
 ## 📁 Directory Structure
 
 ```
 Streamlit-Interface-MCP-Host/
-├── Home.py                 # Main entry point
+├── Home.py                 # Main entry point with system stats
 ├── pages/
-│   └── BasicChat.py       # Chat interface with SSE
+│   └── BasicChat.py       # Advanced chat interface with:
+│                          #   - StreamingSession (persistent state)
+│                          #   - ProgressManager (smart display)
+│                          #   - Event filtering by verbosity
 ├── requirements.txt        # Python dependencies
 ├── test_streaming.py       # SSE test script
 ├── test_integration.py     # Integration test script
-├── CLAUDE.md              # AI agent documentation
-└── README.md              # This file
+├── CLAUDE.md              # Detailed AI agent documentation
+├── README.md              # This file
+└── .claude/               # Task-specific onboarding docs
 ```
+
+## 🚀 Recent Improvements (December 2024)
+
+### UI/UX Enhancements
+- **Smart Progress Display**: Single updating line with progress bars
+- **Verbosity Persistence**: Change detail level without losing data
+- **Floating Controls**: Stop buttons stay with active responses
+- **Collapsible Details**: Technical information on demand
+
+### Technical Improvements
+- **StreamingSession Class**: Persistent state across Streamlit reruns
+- **Memory Management**: Automatic cleanup with 20-stream limit
+- **Error Resilience**: None checks prevent AttributeError crashes
+- **Unique Keys**: Message IDs prevent button conflicts
+- **Timeout Protection**: 10-minute limit for stale streams
+
+### Bug Fixes
+- Fixed verbosity slider data loss issue
+- Fixed memory leak from unlimited stream storage
+- Fixed error formatting consistency
+- Fixed button key collisions
+- Added proper None data handling
 
 ## 🔗 Related Projects
 
