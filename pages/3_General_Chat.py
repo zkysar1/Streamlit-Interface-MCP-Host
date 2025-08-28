@@ -5,10 +5,10 @@ import json
 import streamlit as st
 
 
-st.title("Client Holding Challenge Agent")
+st.title("🤖 General Chat")
 st.write("""
-### Basic Chat for supporing one challenge at a time? 
-Zak Kysar *DRAFT*
+### Free-form conversation without database tools
+**Host:** Tool-Free Direct LLM (`toolfreedirectllm`)
 """)
 
 
@@ -16,7 +16,7 @@ Zak Kysar *DRAFT*
 def send_to_backend_streaming(messages):
     """Send messages to Agents-MCP-Host backend with SSE streaming"""
     url = "http://localhost:8080/host/v1/conversations"
-    payload = {"messages": messages}
+    payload = {"messages": messages, "host": "toolfreedirectllm"}
     headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
     
     try:
@@ -240,20 +240,20 @@ assistants_opening_instructions_to_user = '''Okay.'''
 # { "clientId": "APGEMINI", "portfolio": "my portfolio", "dataAsOfDate": "2023-05-06", "dataPointNameBeingChallenged": "isRestricted", "entityId": "037833DT4", "marketValuePosition": "10000", "rats": ".05", "tmpi": ".02"}
 
 # Initialize chat history and state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+if "general_chat_messages" not in st.session_state:
+    st.session_state.general_chat_messages = []
     # Set base Message to trigger action from user
-    st.session_state.messages.append({"role": "System", "content": systems_opening_instructions_to_assistant })
-    st.session_state.messages.append({"role": "Assistant", "content": assistants_opening_instructions_to_user })
+    st.session_state.general_chat_messages.append({"role": "System", "content": systems_opening_instructions_to_assistant })
+    st.session_state.general_chat_messages.append({"role": "Assistant", "content": assistants_opening_instructions_to_user })
 
-if "stream_id" not in st.session_state:
-    st.session_state.stream_id = None
+if "general_chat_stream_id" not in st.session_state:
+    st.session_state.general_chat_stream_id = None
     
-if "is_executing" not in st.session_state:
-    st.session_state.is_executing = False
+if "general_chat_is_executing" not in st.session_state:
+    st.session_state.general_chat_is_executing = False
 
 # Display chat messages from history on app rerun
-for message in st.session_state.messages:
+for message in st.session_state.general_chat_messages:
     if message["role"] != "System":  # Don't display system messages
         with st.chat_message(message["role"]):
             # Use markdown for better formatting
@@ -271,13 +271,13 @@ def process_command(command):
     messages = []
     
     # Add system message if it exists
-    for msg in st.session_state.messages:
+    for msg in st.session_state.general_chat_messages:
         if msg["role"] == "System":
             messages.append({"role": "system", "content": msg["content"]})
             break
     
     # Add conversation history
-    for msg in st.session_state.messages:
+    for msg in st.session_state.general_chat_messages:
         if msg["role"] == "User":
             messages.append({"role": "user", "content": msg["content"]})
         elif msg["role"] == "Assistant":
@@ -293,12 +293,12 @@ def process_command(command):
 # Add stop button and clear button
 col1, col2, col3 = st.columns([1, 1, 4])
 with col1:
-    if st.button("🛑 Stop", disabled=not st.session_state.is_executing, key="stop_btn"):
-        if st.session_state.stream_id:
+    if st.button("🛑 Stop", disabled=not st.session_state.general_chat_is_executing, key="stop_btn"):
+        if st.session_state.general_chat_stream_id:
             # Send interrupt request
             try:
                 response = requests.post(
-                    f"http://localhost:8080/host/v1/conversations/{st.session_state.stream_id}/interrupt",
+                    f"http://localhost:8080/host/v1/conversations/{st.session_state.general_chat_stream_id}/interrupt",
                     json={"reason": "user_requested"}
                 )
                 st.success("Stop request sent!")
@@ -307,7 +307,7 @@ with col1:
 
 with col2:
     if st.button("🔄 Clear", key="clear_btn"):
-        st.session_state.messages = [
+        st.session_state.general_chat_messages = [
             {"role": "System", "content": systems_opening_instructions_to_assistant},
             {"role": "Assistant", "content": assistants_opening_instructions_to_user}
         ]
@@ -319,7 +319,7 @@ if prompt := st.chat_input("Paste Context or answers or questions. . ."):
     with st.chat_message("user"):
         st.text("User: "+prompt)
     # Add user message to chat history
-    st.session_state.messages.append({"role": "User", "content": prompt})
+    st.session_state.general_chat_messages.append({"role": "User", "content": prompt})
     
     # Display assistant response with streaming
     with st.chat_message("Assistant"):
@@ -332,6 +332,6 @@ if prompt := st.chat_input("Paste Context or answers or questions. . ."):
             response_placeholder.markdown("Assistant: " + full_response)
         
         # Add complete response to chat history
-        st.session_state.messages.append({"role": "Assistant", "content": full_response})
+        st.session_state.general_chat_messages.append({"role": "Assistant", "content": full_response})
         
     

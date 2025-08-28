@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Streamlit-based chat interface that connects to the Agents-MCP-Host backend API. The application provides a web-based chat interface with real-time SSE streaming for tool call notifications, featuring smart progress management and persistent streaming state.
+This is a comprehensive Streamlit-based interface for the Agents-MCP-Host backend API. The application provides multiple pages for monitoring, managing, and interacting with the MCP (Model Context Protocol) system, including real-time dashboards, host management, session monitoring, tool exploration, and an enhanced chat interface with SSE streaming.
 
 ## Quick Start
 
@@ -25,14 +25,84 @@ The app runs on http://localhost:8501 and requires the Java backend on port 8080
 ### Core Components
 
 1. **Home.py**: Entry point with system stats display
-2. **pages/BasicChat.py**: Main chat interface with advanced features:
+
+### Pages
+
+1. **pages/1_System_Dashboard.py**: Real-time system monitoring
+   - Health status, active sessions, uptime metrics
+   - Database connection status
+   - Host availability overview
+   - Critical error alerts
+   - Auto-refresh with configurable intervals
+
+2. **pages/2_Host_Manager.py**: Host management interface
+   - View all available hosts and their status
+   - Select preferred host for conversations
+   - Automatic fallback configuration
+   - Host capabilities documentation
+
+3. **pages/3_Session_Monitor.py**: Session tracking and management
+   - Monitor active streaming sessions
+   - Interrupt/cancel sessions
+   - Submit session feedback
+   - Session analytics and history
+
+4. **pages/4_MCP_Tools.py**: MCP tools and clients explorer
+   - Browse available MCP tools with schemas
+   - View connected MCP clients
+   - Search and filter tools
+   - MCP system documentation
+
+5. **pages/5_Enhanced_Chat.py**: Enhanced chat interface
+   - Host selection per conversation
+   - Session ID tracking and display
+   - Real-time progress indicators
+   - In-chat feedback buttons
+   - Interrupt capability
+
+6. **pages/AllChat.py**: Original chat interface with advanced features:
    - Persistent streaming sessions across reruns
    - Dynamic verbosity control (Minimal/Normal/Detailed)
    - Smart progress display with in-place updates
    - Floating control buttons within messages
    - Collapsible technical details
 
-### Key Classes
+### Utility Modules
+
+1. **utils/api_client.py**: Centralized API client
+   - All endpoint implementations
+   - SSE streaming parser
+   - Error handling and retries
+   - Helper methods for formatting
+
+2. **utils/ui_components.py**: Reusable UI components
+   - Status badges and indicators
+   - Refresh controls
+   - Metric cards
+   - Error displays
+   - Expandable JSON viewers
+
+### API Endpoints Coverage
+
+The application interfaces with all 13 endpoints from ConversationStreaming.java:
+
+| Endpoint | Method | Page | Purpose |
+|----------|--------|------|---------|
+| `/` | GET | (API only) | Welcome page |
+| `/health` | GET | System Dashboard | Health check |
+| `/status` | GET | System Dashboard | Comprehensive status |
+| `/hosts/status` | GET | System Dashboard, Host Manager | Host availability |
+| `/conversations` | POST | Enhanced Chat | Main conversation (streaming) |
+| `/conversations/streaming` | POST | Enhanced Chat | Explicit streaming |
+| `/conversations/{id}` | DELETE | Session Monitor | Cancel session |
+| `/conversations/{id}/interrupt` | POST | Session Monitor, Enhanced Chat | Interrupt session |
+| `/conversations/{id}/feedback` | POST | Session Monitor, Enhanced Chat | Submit feedback |
+| `/conversations/{id}/status` | GET | Session Monitor | Session status |
+| `/mcp/status` | GET | MCP Tools | MCP system status |
+| `/mcp/tools` | GET | MCP Tools | Available tools list |
+| `/mcp/clients` | GET | MCP Tools | Connected clients |
+
+### Key Classes (from AllChat.py)
 
 #### StreamingSession (lines 19-82)
 Manages persistent streaming state across Streamlit reruns:
@@ -112,6 +182,16 @@ User Input → process_command() → send_to_backend_streaming()
 4. **Code deduplication**: Created show_technical_details() helper
 5. **Button key fixes**: Use message_id instead of index
 6. **Stale stream handling**: Auto-timeout after 10 minutes
+
+## New Features Added (December 2024)
+
+1. **Comprehensive Dashboard System**: Full visibility into MCP system health
+2. **Multi-Host Support**: Choose between different processing hosts
+3. **Session Management**: Track, interrupt, and manage active sessions
+4. **Tool Discovery**: Browse and understand available MCP tools
+5. **Enhanced Chat**: Improved chat with host selection and feedback
+6. **Centralized API Client**: Reusable client for all endpoints
+7. **Shared UI Components**: Consistent design across all pages
 
 ## Common Development Tasks
 

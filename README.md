@@ -195,24 +195,6 @@ Enable debug prints by uncommenting lines in BasicChat.py:
 - Line 286 in `send_to_backend_streaming()` for SSE events
 - Add prints in `handle_event()` for event processing
 
-## 📁 Directory Structure
-
-```
-Streamlit-Interface-MCP-Host/
-├── Home.py                 # Main entry point with system stats
-├── pages/
-│   └── BasicChat.py       # Advanced chat interface with:
-│                          #   - StreamingSession (persistent state)
-│                          #   - ProgressManager (smart display)
-│                          #   - Event filtering by verbosity
-├── requirements.txt        # Python dependencies
-├── test_streaming.py       # SSE test script
-├── test_integration.py     # Integration test script
-├── CLAUDE.md              # Detailed AI agent documentation
-├── README.md              # This file
-└── .claude/               # Task-specific onboarding docs
-```
-
 ## 🚀 Recent Improvements (December 2024)
 
 ### UI/UX Enhancements
