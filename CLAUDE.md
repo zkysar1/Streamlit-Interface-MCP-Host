@@ -158,7 +158,7 @@ The app rebuilds displays from stored events when verbosity changes:
 | execution_paused | ✅ | ✅ | ✅ | Always shown |
 | agent_question | ✅ | ✅ | ✅ | User interaction |
 | error | ✅ | ✅ | ✅ | Always prominent |
-| final_response | ✅ | ✅ | ✅ | Main content |
+| final | ✅ | ✅ | ✅ | Main content |
 
 ### SSE Streaming Architecture
 
@@ -240,7 +240,7 @@ print(f"Session {message_id}: active={session.is_active}, events={len(session.ev
 | Response disappears | Streamlit rerun without state | Use StreamingSession for persistence |
 | Duplicate stop buttons | Key collision with index | Use message_id for keys |
 | Memory growth | No stream cleanup | Check cleanup logic runs |
-| Stuck "Streaming..." | No final_response event | Check is_stale() timeout |
+| Stuck "Streaming..." | No final event | Check is_stale() timeout |
 
 ## Performance Considerations
 

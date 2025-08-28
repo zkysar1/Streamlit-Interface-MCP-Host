@@ -50,10 +50,10 @@ def send_to_backend_streaming(messages):
                     # Parse and handle the event
                     try:
                         # Handle different event types
-                        if current_event == 'tool_call_start':
+                        if current_event == 'tool.start':
                             data = json.loads(data_str)
                             yield f"🔧 {data.get('message', 'Starting tool call...')}\n\n"
-                        elif current_event == 'tool_call_complete':
+                        elif current_event == 'tool.complete':
                             data = json.loads(data_str)
                             yield f"✓ Tool completed: {data.get('tool', 'unknown')}\n\n"
                         elif current_event == 'progress':
@@ -135,7 +135,7 @@ def send_to_backend_streaming(messages):
                                 elapsed = data.get('elapsed', 0)
                                 yield f"📊 Progress: {step} - {message} ({elapsed}ms)\n\n"
                                 
-                        elif current_event == 'execution_paused':
+                        elif current_event == 'interrupt':
                             data = json.loads(data_str)
                             yield f"\n⏸️ **Execution Paused**\n"
                             yield f"Reason: {data.get('reason', 'User requested')}\n"
@@ -163,7 +163,7 @@ def send_to_backend_streaming(messages):
                                 yield f"🔗 Connected to stream: {stream_id}\n\n"
                             except Exception as e:
                                 print(f"[DEBUG] Error parsing connected event: {e}")
-                        elif current_event == 'final_response':
+                        elif current_event == 'final':
                             try:
                                 data = json.loads(data_str)
                                 content = data.get('content', '')
@@ -189,17 +189,7 @@ def send_to_backend_streaming(messages):
                             st.session_state.db_chat_is_executing = False
                             st.session_state.db_chat_stream_id = None
                             return
-                        elif current_event == 'done':
-                            # Handle stream completion
-                            try:
-                                data = json.loads(data_str)
-                                print(f"[DEBUG] Stream completed: {data.get('message', 'Done')}")
-                            except Exception as e:
-                                print(f"[DEBUG] Error parsing done event: {e}")
-                            # Clear execution state on done
-                            st.session_state.db_chat_is_executing = False
-                            st.session_state.db_chat_stream_id = None
-                            return
+                        # Note: 'done' event removed - backend doesn't send this
                         else:
                             # Unknown event type
                             print(f"[DEBUG] Unknown event type: {current_event}")
