@@ -9,7 +9,7 @@ class MCPApiClient:
     
     def __init__(self, base_url: str = "http://localhost:8080/host/v1"):
         self.base_url = base_url
-        self.timeout = 30
+        self.timeout = 300  # 5 minutes to allow for long OpenAI responses
         self.session = requests.Session()
     
     def close(self):

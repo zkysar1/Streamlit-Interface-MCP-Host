@@ -24,7 +24,7 @@ def send_to_backend_streaming(messages):
     
     try:
         # Make streaming request
-        response = requests.post(url, json=payload, headers=headers, stream=True, timeout=30)
+        response = requests.post(url, json=payload, headers=headers, stream=True, timeout=300)
         response.raise_for_status()
         
         # Debug: Check response type

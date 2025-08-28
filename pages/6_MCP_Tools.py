@@ -67,7 +67,3 @@ except Exception as e:
         "note": "The MCP event bus handler may not be registered"
     }
 st.code(json.dumps(mcp_clients, indent=2), language="json")
-
-# Info message at the bottom
-st.divider()
-st.info("Note: If you see error messages above, the MCP event bus handlers may not be registered in the backend. The endpoints exist but require corresponding event bus consumers.")
