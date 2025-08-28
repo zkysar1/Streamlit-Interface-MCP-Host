@@ -19,6 +19,9 @@ def send_to_backend_streaming(messages):
     payload = {"messages": messages, "host": "toolfreedirectllm"}
     headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
     
+    # Set execution state
+    st.session_state.general_chat_is_executing = True
+    
     try:
         # Make streaming request
         response = requests.post(url, json=payload, headers=headers, stream=True, timeout=30)
@@ -155,18 +158,26 @@ def send_to_backend_streaming(messages):
                             try:
                                 data = json.loads(data_str)
                                 stream_id = data.get('streamId', 'unknown')
+                                # Store stream ID in session state
+                                st.session_state.general_chat_stream_id = stream_id
                                 yield f"🔗 Connected to stream: {stream_id}\n\n"
-                            except:
-                                pass
+                            except Exception as e:
+                                print(f"[DEBUG] Error parsing connected event: {e}")
                         elif current_event == 'final_response':
                             try:
                                 data = json.loads(data_str)
                                 content = data.get('content', '')
                                 yield content
+                                # Clear execution state on completion
+                                st.session_state.general_chat_is_executing = False
+                                st.session_state.general_chat_stream_id = None
                                 return  # Exit the generator
                             except json.JSONDecodeError as e:
                                 yield f"❌ Failed to parse final response: {e}\n"
                                 yield f"Raw data: {data_str}\n"
+                                # Clear execution state on error
+                                st.session_state.general_chat_is_executing = False
+                                st.session_state.general_chat_stream_id = None
                                 return
                         elif current_event == 'error':
                             try:
@@ -174,14 +185,20 @@ def send_to_backend_streaming(messages):
                                 yield f"❌ Error: {data.get('message', 'Unknown error')}"
                             except:
                                 yield f"❌ Error event with unparseable data: {data_str}"
+                            # Clear execution state on error
+                            st.session_state.general_chat_is_executing = False
+                            st.session_state.general_chat_stream_id = None
                             return
                         elif current_event == 'done':
                             # Handle stream completion
                             try:
                                 data = json.loads(data_str)
                                 print(f"[DEBUG] Stream completed: {data.get('message', 'Done')}")
-                            except:
-                                pass
+                            except Exception as e:
+                                print(f"[DEBUG] Error parsing done event: {e}")
+                            # Clear execution state on done
+                            st.session_state.general_chat_is_executing = False
+                            st.session_state.general_chat_stream_id = None
                             return
                         else:
                             # Unknown event type
@@ -205,19 +222,29 @@ def send_to_backend_streaming(messages):
                 current_data.append(line[6:])
                 
     except requests.exceptions.ConnectionError:
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         yield "❌ Backend server not running. Please start Agents-MCP-Host on port 8080."
     except requests.exceptions.HTTPError as e:
         try:
             error_detail = e.response.json().get('error', {}).get('message', str(e))
         except:
             error_detail = str(e)
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         yield f"❌ Backend error: {error_detail}"
     except requests.exceptions.Timeout:
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         yield "❌ Request timed out. The backend took too long to respond."
     except json.JSONDecodeError as e:
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         yield f"❌ Error parsing JSON: {e}\nRaw data: {data_str[:200] if 'data_str' in locals() else 'None'}"
     except Exception as e:
         import traceback
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         yield f"❌ Unexpected error: {str(e)}\n{traceback.format_exc()}"
 
 
@@ -243,8 +270,8 @@ assistants_opening_instructions_to_user = '''Okay.'''
 if "general_chat_messages" not in st.session_state:
     st.session_state.general_chat_messages = []
     # Set base Message to trigger action from user
-    st.session_state.general_chat_messages.append({"role": "System", "content": systems_opening_instructions_to_assistant })
-    st.session_state.general_chat_messages.append({"role": "Assistant", "content": assistants_opening_instructions_to_user })
+    st.session_state.general_chat_messages.append({"role": "system", "content": systems_opening_instructions_to_assistant })
+    st.session_state.general_chat_messages.append({"role": "assistant", "content": assistants_opening_instructions_to_user })
 
 if "general_chat_stream_id" not in st.session_state:
     st.session_state.general_chat_stream_id = None
@@ -254,13 +281,10 @@ if "general_chat_is_executing" not in st.session_state:
 
 # Display chat messages from history on app rerun
 for message in st.session_state.general_chat_messages:
-    if message["role"] != "System":  # Don't display system messages
+    if message["role"] != "system":  # Don't display system messages
         with st.chat_message(message["role"]):
-            # Use markdown for better formatting
-            if message["role"] == "Assistant":
-                st.markdown(message["content"])
-            else:
-                st.text(message["role"]+": "+message["content"])
+            # Use markdown for all messages
+            st.markdown(message["content"])
 
 
 
@@ -270,18 +294,9 @@ def process_command(command):
     # Build messages for backend API
     messages = []
     
-    # Add system message if it exists
+    # Add all messages (system, user, assistant) to the API request
     for msg in st.session_state.general_chat_messages:
-        if msg["role"] == "System":
-            messages.append({"role": "system", "content": msg["content"]})
-            break
-    
-    # Add conversation history
-    for msg in st.session_state.general_chat_messages:
-        if msg["role"] == "User":
-            messages.append({"role": "user", "content": msg["content"]})
-        elif msg["role"] == "Assistant":
-            messages.append({"role": "assistant", "content": msg["content"]})
+        messages.append({"role": msg["role"], "content": msg["content"]})
     
     # Add current user command
     messages.append({"role": "user", "content": command})
@@ -302,36 +317,42 @@ with col1:
                     json={"reason": "user_requested"}
                 )
                 st.success("Stop request sent!")
-            except:
-                st.error("Failed to send stop request")
+                # Clear execution state after interrupt
+                st.session_state.general_chat_is_executing = False
+                st.session_state.general_chat_stream_id = None
+            except Exception as e:
+                st.error(f"Failed to send stop request: {str(e)}")
 
 with col2:
     if st.button("🔄 Clear", key="clear_btn"):
         st.session_state.general_chat_messages = [
-            {"role": "System", "content": systems_opening_instructions_to_assistant},
-            {"role": "Assistant", "content": assistants_opening_instructions_to_user}
+            {"role": "system", "content": systems_opening_instructions_to_assistant},
+            {"role": "assistant", "content": assistants_opening_instructions_to_user}
         ]
+        # Also clear execution state
+        st.session_state.general_chat_is_executing = False
+        st.session_state.general_chat_stream_id = None
         st.rerun()
 
 # React to user input
 if prompt := st.chat_input("Paste Context or answers or questions. . ."):
     # Display user message in chat message container
     with st.chat_message("user"):
-        st.text("User: "+prompt)
+        st.markdown(prompt)
     # Add user message to chat history
-    st.session_state.general_chat_messages.append({"role": "User", "content": prompt})
+    st.session_state.general_chat_messages.append({"role": "user", "content": prompt})
     
     # Display assistant response with streaming
-    with st.chat_message("Assistant"):
+    with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
         
         # Stream the response
         for chunk in process_command(prompt):
             full_response += chunk
-            response_placeholder.markdown("Assistant: " + full_response)
+            response_placeholder.markdown(full_response)
         
         # Add complete response to chat history
-        st.session_state.general_chat_messages.append({"role": "Assistant", "content": full_response})
+        st.session_state.general_chat_messages.append({"role": "assistant", "content": full_response})
         
     
