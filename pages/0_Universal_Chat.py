@@ -147,11 +147,18 @@ def send_to_backend_streaming(messages, backstory, guidance):
                             st.session_state.universal_chat_stream_id = stream_id
                             
                         elif current_event == 'progress':
-                            # Only show SQL queries and results
+                            # Show all progress events
                             data = json.loads(data_str)
                             details = data.get('details', {})
                             phase = details.get('phase', '')
+                            message = data.get('message', '')
+                            step = data.get('step', '')
                             
+                            # Show general progress messages
+                            if message and step != 'host_started':  # Skip the initial host started message
+                                yield f"🔄 {message}\n"
+                            
+                            # Handle SQL-specific phases
                             if phase == 'sql_query':
                                 query = details.get('query', '')
                                 if query:
@@ -167,6 +174,45 @@ def send_to_backend_streaming(messages, backstory, guidance):
                                             yield f"{json.dumps(row, indent=2)}\n"
                                         if row_count > 3:
                                             yield f"... and {row_count - 3} more rows\n"
+                        
+                        # Handle pipeline-specific events
+                        elif current_event and current_event.startswith('pipeline'):
+                            data = json.loads(data_str)
+                            
+                            if current_event == 'pipeline.depth_determined':
+                                depth = data.get('execution_depth', 0)
+                                query_type = data.get('query_type', 'unknown')
+                                yield f"📊 Analysis: {query_type} query, using depth {depth}\n"
+                                
+                            elif current_event == 'pipeline.execution_start':
+                                total_levels = data.get('total_levels', 0)
+                                yield f"🚀 Starting pipeline execution ({total_levels} levels)\n"
+                                
+                            elif current_event == 'pipeline.level_start':
+                                level = data.get('level', 0)
+                                description = data.get('description', '')
+                                yield f"  ▶️ Level {level}: {description}\n"
+                                
+                            elif current_event == 'pipeline.execution_complete':
+                                levels_completed = data.get('levels_completed', 0)
+                                yield f"✅ Pipeline complete ({levels_completed} levels executed)\n"
+                        
+                        # Handle tool events
+                        elif current_event == 'tool_start':
+                            data = json.loads(data_str)
+                            tool = data.get('tool', 'unknown')
+                            description = data.get('description', '')
+                            yield f"🔧 Using tool: {tool}"
+                            if description:
+                                yield f" - {description}"
+                            yield "\n"
+                            
+                        elif current_event == 'tool_complete':
+                            data = json.loads(data_str)
+                            tool = data.get('tool', 'unknown')
+                            success = data.get('success', False)
+                            if success:
+                                yield f"  ✓ {tool} completed\n"
                                             
                         elif current_event == 'final':
                             data = json.loads(data_str)
@@ -258,7 +304,7 @@ def process_command(command):
     messages.append({"role": "user", "content": command})
     
     # Stream from backend with backstory and guidance
-    return send_to_backend_streaming(messages, backstory, guidance)
+    yield from send_to_backend_streaming(messages, backstory, guidance)
 
 
 # Simple clear button
