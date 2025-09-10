@@ -35,11 +35,6 @@ try:
     health_data = api_client.get_health()
     st.code(json.dumps(health_data, indent=2), language="json")
     
-    # Get comprehensive status
-    st.subheader("Comprehensive Status")
-    status_data = api_client.get_status()
-    st.code(json.dumps(status_data, indent=2), language="json")
-    
     # Get hosts status
     st.subheader("Hosts Status")
     hosts_data = api_client.get_hosts_status()

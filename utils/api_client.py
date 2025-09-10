@@ -62,11 +62,6 @@ class MCPApiClient:
         return response.json()
     
     # Session Management Endpoints
-    def get_session_status(self, session_id: str) -> Dict[str, Any]:
-        """Get status of a specific session"""
-        response = self._make_request('GET', f'/conversations/{session_id}/status')
-        return response.json()
-    
     def interrupt_session(self, session_id: str, reason: str = "User requested", graceful: bool = True) -> Dict[str, Any]:
         """Interrupt an active session"""
         payload = {
