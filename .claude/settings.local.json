@@ -12,7 +12,8 @@
       "Bash(mkdir:*)",
       "Bash(grep:*)",
       "Bash(cp:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Read(//mnt/c/ZakNoCloud/GitHub/MCPThink/**)"
     ],
     "deny": [],
     "ask": []
