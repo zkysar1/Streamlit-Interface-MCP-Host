@@ -129,6 +129,7 @@ def send_to_backend_streaming(messages, backstory, guidance):
         # Manual SSE parsing
         current_event = None
         current_data = []
+        current_step = None  # Track current step for indentation
         
         # Process SSE stream line by line
         for line in response.iter_lines():
@@ -154,14 +155,36 @@ def send_to_backend_streaming(messages, backstory, guidance):
                             message = data.get('message', '')
                             step = data.get('step', '')
                             
-                            # Show general progress messages
-                            if message and step != 'host_started':  # Skip the initial host started message
-                                yield f"🔄 {message}\n"
+                            # Format based on phase
+                            if phase in ['intent_complete', 'schema_complete', 'sql_complete', 'execution_complete']:
+                                # Milestone completion - show with checkmark on new line
+                                if message:
+                                    yield f"\n{message}\n"
+                            elif phase == 'milestone_decision':
+                                # Show strategy selection prominently (already has newline)
+                                target = details.get('target_milestone', 0)
+                                yield f"\n📍 **Strategy:** {message}\n\n"
+                            elif message and step != 'host_started':  # Skip the initial host started message
+                                # Check if this is a Step event
+                                if step and step.startswith("Step "):
+                                    # This is a main step - track it and show prominently
+                                    current_step = step
+                                    if step != message:
+                                        yield f"\n➤ **{step}** - {message}\n"
+                                    else:
+                                        yield f"\n➤ **{step}**\n"
+                                else:
+                                    # Other progress events get indented if we're in a step
+                                    if current_step:
+                                        yield f"    └─ {message}\n"
+                                    else:
+                                        yield f"\n➤ {message}\n"
                             
                             # Handle SQL-specific phases
                             if phase == 'sql_query':
                                 query = details.get('query', '')
                                 if query:
+                                    # SQL code blocks render properly without manual indentation
                                     yield f"\n```sql\n{query}\n```\n"
                                     
                             elif phase == 'sql_result':
@@ -238,22 +261,50 @@ def send_to_backend_streaming(messages, backstory, guidance):
                                 levels_completed = data.get('levels_completed', 0)
                                 yield f"✅ Pipeline complete ({levels_completed} levels executed)\n"
                         
-                        # Handle tool events
+                        # Handle milestone completion events
+                        elif current_event and '.' in current_event and current_event.startswith('milestone.'):
+                            data = json.loads(data_str)
+                            message = data.get('message', '')
+                            milestone_name = data.get('milestone_name', '')
+                            
+                            # These are completion events, indent under current step
+                            if current_step:
+                                # Clean up the message - remove duplicate milestone name if present
+                                clean_message = message
+                                if milestone_name and milestone_name in message:
+                                    clean_message = message.replace(f"{milestone_name} - ", "")
+                                yield f"    └─ {clean_message}\n"
+                            else:
+                                yield f"\n➤ {message}\n"
+                        
+                        # Handle tool events (always show)
                         elif current_event == 'tool_start':
                             data = json.loads(data_str)
                             tool = data.get('tool', 'unknown')
                             description = data.get('description', '')
-                            yield f"🔧 Using tool: {tool}"
-                            if description:
-                                yield f" - {description}"
-                            yield "\n"
+                            if current_step:
+                                # Add extra newline at start for proper spacing
+                                yield f"\n    ├─ 🔧 {description or tool}...\n"
+                            else:
+                                yield f"\n├─ 🔧 {description or tool}...\n"
                             
                         elif current_event == 'tool_complete':
                             data = json.loads(data_str)
-                            tool = data.get('tool', 'unknown')
                             success = data.get('success', False)
-                            if success:
-                                yield f"  ✓ {tool} completed\n"
+                            tool = data.get('tool', 'unknown')
+                            
+                            if not success:
+                                # Always show failures with extra newline
+                                if current_step:
+                                    yield f"\n    ❌ Tool failed: {tool}\n"
+                                else:
+                                    yield f"\n❌ Tool failed: {tool}\n"
+                            elif success:
+                                # Always show success with extra newline
+                                if current_step:
+                                    yield f"\n    ├─ ✓ {tool} completed\n"
+                                else:
+                                    yield f"\n├─ ✓ {tool} completed\n"
                                             
                         elif current_event == 'final':
                             data = json.loads(data_str)
