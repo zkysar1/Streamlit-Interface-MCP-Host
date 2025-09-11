@@ -48,55 +48,67 @@ if "custom_guidance" not in st.session_state:
 
 st.title("🚀 Universal Chat")
 
-# Simple agent selection
-selected_agent = st.selectbox(
-    "Select agent:",
-    options=list(AGENT_CONFIGS.keys()),
-    index=list(AGENT_CONFIGS.keys()).index(st.session_state.selected_agent),
-    key="agent_selector"
-)
+# Agent selection buttons
+st.markdown("**Select Agent:**")
+cols = st.columns(4)
 
-# Update selection if changed
-if selected_agent != st.session_state.selected_agent:
-    st.session_state.selected_agent = selected_agent
-    st.session_state.universal_chat_messages = []
-    st.session_state.universal_chat_stream_id = None
-    st.session_state.universal_chat_is_executing = False
+agents = list(AGENT_CONFIGS.keys())
+for i, agent_name in enumerate(agents):
+    with cols[i]:
+        # Button type changes based on selection
+        button_type = "primary" if agent_name == st.session_state.selected_agent else "secondary"
+        
+        if st.button(
+            agent_name,
+            key=f"agent_btn_{agent_name}",
+            type=button_type,
+            use_container_width=True
+        ):
+            # Update selection and clear chat
+            st.session_state.selected_agent = agent_name
+            st.session_state.universal_chat_messages = []
+            st.session_state.universal_chat_stream_id = None
+            st.session_state.universal_chat_is_executing = False
+            st.rerun()
 
-# Display agent configuration for Free Agent only
-if selected_agent == "Free Agent":
-    st.divider()
-    # Custom input fields for Free Agent
-    st.subheader("🎯 Custom Agent Configuration")
-    st.markdown("Define your own agent by providing backstory and guidance:")
+selected_agent = st.session_state.selected_agent
+
+# Display agent configuration
+st.markdown("---")
+st.markdown("### Agent Configuration")
+
+if selected_agent != "Free Agent":
+    # Show predefined agent's backstory and guidance
+    config = AGENT_CONFIGS[selected_agent]
     
-    col1, col2 = st.columns(2)
+    st.markdown("**Backstory:**")
+    st.markdown(config["backstory"])
     
-    with col1:
-        custom_backstory = st.text_area(
-            "Backstory (Required)",
-            value=st.session_state.custom_backstory,
-            placeholder="Define your agent's personality, expertise, and background...",
-            height=150,
-            key="custom_backstory_input",
-            help="Describe what kind of assistant this should be"
-        )
-        st.session_state.custom_backstory = custom_backstory
+    st.markdown("")  # Add spacing
+    st.markdown("**Guidance:**")
+    st.markdown(config["guidance"])
     
-    with col2:
-        custom_guidance = st.text_area(
-            "Guidance and Guardrails (Required)",
-            value=st.session_state.custom_guidance,
-            placeholder="Define behavioral guidelines and rules for your agent...",
-            height=150,
-            key="custom_guidance_input",
-            help="Provide specific guidance on how the agent should behave"
-        )
-        st.session_state.custom_guidance = custom_guidance
+else:  # Free Agent
+    # Editable fields for Free Agent
+    st.markdown("**Backstory:**")
+    custom_backstory = st.text_area(
+        label="Backstory",
+        value=st.session_state.custom_backstory,
+        height=100,
+        key="custom_backstory_input",
+        label_visibility="collapsed"
+    )
+    st.session_state.custom_backstory = custom_backstory
     
-    # Validation warning
-    if not custom_backstory or not custom_guidance:
-        st.warning("⚠️ Both Backstory and Guidance are required for Free Agent")
+    st.markdown("**Guidance:**")
+    custom_guidance = st.text_area(
+        label="Guidance", 
+        value=st.session_state.custom_guidance,
+        height=100,
+        key="custom_guidance_input",
+        label_visibility="collapsed"
+    )
+    st.session_state.custom_guidance = custom_guidance
 
 # Simple divider
 st.markdown("---")
@@ -176,7 +188,7 @@ def send_to_backend_streaming(messages, backstory, guidance):
                                 else:
                                     # Other progress events get indented if we're in a step
                                     if current_step:
-                                        yield f"    └─ {message}\n"
+                                        yield f"\n    └─ {message}\n"
                                     else:
                                         yield f"\n➤ {message}\n"
                             
@@ -439,11 +451,14 @@ def send_to_backend_streaming(messages, backstory, guidance):
         st.session_state.universal_chat_is_executing = False
         st.session_state.universal_chat_stream_id = None
         yield "❌ Request timed out. The backend took too long to respond."
-    except Exception as e:
-        import traceback
+    except requests.exceptions.ChunkedEncodingError:
         st.session_state.universal_chat_is_executing = False
         st.session_state.universal_chat_stream_id = None
-        yield f"❌ Unexpected error: {str(e)}\n{traceback.format_exc()}"
+        yield "❌ Connection lost. The backend connection was interrupted. Please try again."
+    except Exception as e:
+        st.session_state.universal_chat_is_executing = False
+        st.session_state.universal_chat_stream_id = None
+        yield f"❌ Unexpected error: {str(e)}"
 
 
 def process_command(command):
